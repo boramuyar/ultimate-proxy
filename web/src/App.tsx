@@ -53,15 +53,11 @@ export default function App() {
   );
 }
 
-function Brand() {
+function Logo({ className }: { className?: string }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <img src="/favicon.svg" alt="" className="size-7" />
-      <div className="leading-tight">
-        <div className="text-[13px] font-bold uppercase tracking-wider">Ultimate_Proxy</div>
-        <div className="text-[10.5px] text-muted-foreground">open responses gateway</div>
-      </div>
-    </div>
+    <svg viewBox="0 0 24 24" aria-hidden className={cn("size-5", className)}>
+      <path d="M12 2 22.5 20.5h-21Z" fill="currentColor" />
+    </svg>
   );
 }
 
@@ -86,25 +82,28 @@ function Login({ onToken }: { onToken: (t: string) => void }) {
   }
 
   return (
-    <div className="grid min-h-screen place-items-center p-4">
-      <form onSubmit={submit} className="w-full max-w-sm border border-strong bg-card shadow-[6px_6px_0_0_var(--strong)]">
-        <div className="border-b border-strong px-5 py-4">
-          <Brand />
+    <div className="grid min-h-screen place-items-center bg-background p-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 flex flex-col items-center gap-4 text-center">
+          <Logo className="size-9" />
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Sign in to ultimate-proxy</h1>
+            <p className="mt-1.5 text-muted-foreground">
+              Use the proxy's admin token, <code className="font-mono text-[13px] text-foreground">PROXY_ADMIN_TOKEN</code>.
+            </p>
+          </div>
         </div>
-        <div className="grid gap-4 px-5 py-5">
-          <p className="font-sans text-[13.5px] text-muted-foreground">
-            Sign in with the proxy's admin token, <code className="font-mono text-foreground">PROXY_ADMIN_TOKEN</code>.
-          </p>
+        <form onSubmit={submit} className="grid gap-4 rounded-xl border bg-card p-6 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
           <ErrorBox error={error} />
-          <div className="grid gap-1.5">
+          <div className="grid gap-2">
             <Label htmlFor="token">Admin token</Label>
             <Input id="token" type="password" autoFocus value={value} onChange={(e) => setValue(e.target.value)} />
           </div>
-          <Button type="submit" disabled={!value.trim() || busy}>
-            {busy ? "Checking…" : "Sign in →"}
+          <Button type="submit" size="lg" disabled={!value.trim() || busy}>
+            {busy ? "Checking…" : "Continue"}
           </Button>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }
@@ -144,57 +143,59 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
 
   return (
     <DirectoryContext.Provider value={directory}>
-      <div className="min-h-screen md:grid md:grid-cols-[232px_1fr]">
-        <aside className="flex flex-col border-b border-strong bg-card md:sticky md:top-0 md:h-screen md:border-r md:border-b-0">
-          <div className="border-b border-strong px-4 py-4">
-            <Brand />
+      <div className="min-h-screen">
+        <header className="bg-card">
+          <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-3 px-4 md:px-6">
+            <a href="#/overview" aria-label="Overview" className="text-foreground">
+              <Logo />
+            </a>
+            <Slash />
+            <span className="font-medium">ultimate-proxy</span>
+            <span className="hidden rounded-full border px-2 text-xs leading-5 text-muted-foreground sm:inline">admin</span>
+            <div className="ml-auto flex items-center gap-4">
+              <span className="hidden items-center gap-2 text-[13px] text-muted-foreground sm:flex" title="GET /healthz">
+                <span className={cn("size-2 rounded-full", health.data ? "bg-[#0cce6b]" : health.loading ? "bg-faint" : "bg-critical")} />
+                {health.data ? "Healthy" : health.loading ? "Checking" : "Unreachable"}
+              </span>
+              <Button variant="outline" size="sm" onClick={onSignOut}>
+                <LogOut /> Sign out
+              </Button>
+            </div>
           </div>
-          <nav aria-label="Sections" className="flex flex-wrap md:flex-col">
-            {keys.map((k, i) => (
+        </header>
+        <nav aria-label="Sections" className="sticky top-0 z-40 border-b bg-card/90 backdrop-blur">
+          <div className="mx-auto flex max-w-[1200px] gap-1 overflow-x-auto px-2 md:px-4">
+            {keys.map((k) => (
               <a
                 key={k}
                 href={`#/${k}`}
                 aria-current={k === page ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-3 border-b border-border px-4 py-2.5 text-[12px] font-medium uppercase tracking-wider outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                  k === page && "bg-foreground text-background hover:bg-foreground",
+                  "relative flex h-12 shrink-0 items-center gap-2 px-3 text-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:text-foreground",
+                  "after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full",
+                  k === page && "text-foreground after:bg-foreground",
                 )}
               >
-                <span className={cn("tabular-nums text-muted-foreground", k === page && "text-background/60")}>{String(i + 1).padStart(2, "0")}</span>
-                <span className="flex-1">{PAGES[k].label}</span>
+                {PAGES[k].label}
                 {k === "insights" && openCount > 0 && (
-                  <span className="bg-critical px-1.5 text-[10.5px] font-bold text-white tabular-nums">{openCount}</span>
+                  <span className="rounded-full bg-critical px-1.5 text-[11px] leading-[18px] font-medium text-white tabular-nums">{openCount}</span>
                 )}
               </a>
             ))}
-          </nav>
-          <div className="mt-auto hidden border-t border-strong md:block">
-            <div className="flex items-center gap-2 px-4 py-2.5 text-[11px] text-muted-foreground">
-              <span className={cn("inline-block size-2", health.data ? "bg-good" : health.loading ? "bg-muted-foreground" : "bg-critical")} />
-              {health.data ? "proxy online" : health.loading ? "checking proxy" : "proxy unreachable"}
-            </div>
-            <button
-              onClick={onSignOut}
-              className="flex w-full cursor-pointer items-center gap-2 border-t border-border px-4 py-2.5 text-left text-[12px] uppercase tracking-wider hover:bg-muted"
-            >
-              <LogOut className="size-3.5" /> Sign out
-            </button>
           </div>
-        </aside>
-        <div className="min-w-0">
-          <div className="flex h-11 items-center justify-between border-b border-strong bg-card px-5 text-[12px] md:px-8">
-            <span className="text-muted-foreground">
-              ~/admin/<span className="text-foreground">{page}</span>
-            </span>
-            <button onClick={onSignOut} className="cursor-pointer text-[11px] uppercase tracking-wider underline md:hidden">
-              Sign out
-            </button>
-          </div>
-          <main className="mx-auto max-w-[1320px] px-4 py-6 md:px-8">
-            <Component range={range} setRange={setRange} />
-          </main>
-        </div>
+        </nav>
+        <main className="mx-auto max-w-[1200px] px-4 py-8 md:px-6">
+          <Component range={range} setRange={setRange} />
+        </main>
       </div>
     </DirectoryContext.Provider>
+  );
+}
+
+function Slash() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden className="size-6 text-[#d4d4d4]">
+      <path d="M16.88 3.55 7.12 20.45" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   );
 }

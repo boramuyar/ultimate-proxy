@@ -85,8 +85,8 @@ export default function Usage({ range, setRange }: PageProps) {
         <RangePicker value={range} onChange={setRange} />
       </PageHeader>
 
-      <Card className="mb-5">
-        <div className="grid gap-4 p-4">
+      <Card className="mb-6">
+        <div className="grid gap-4 p-5">
           <div className="flex flex-wrap items-center gap-3">
             <Label className="w-20">Group by</Label>
             <ToggleGroup type="multiple" value={groupBy} onValueChange={(v) => setGroupBy(v as Dimension[])} aria-label="Group by">
@@ -155,7 +155,7 @@ export default function Usage({ range, setRange }: PageProps) {
       <Card>
         <CardHeader>
           <CardTitle>Results</CardTitle>
-          <span className="text-[11px] text-muted-foreground">{rows.data ? `${rows.data.length} rows` : ""}</span>
+          <span className="text-[13px] text-muted-foreground">{rows.data ? `${rows.data.length} rows` : ""}</span>
         </CardHeader>
         {!rows.data?.length ? (
           <Empty>{rows.loading ? "Loading…" : "No usage matches."}</Empty>
@@ -194,7 +194,7 @@ export default function Usage({ range, setRange }: PageProps) {
                     {fmtNumber(r.cached_input_tokens)} <span className="text-muted-foreground">{fmtPct(hitRate(r.cached_input_tokens, r.input_tokens)).padStart(4, " ")}</span>
                   </TableCell>
                   <TableCell className="text-right">{fmtNumber(r.output_tokens)}</TableCell>
-                  <TableCell className="text-right font-bold">{fmtNumber(r.total_tokens)}</TableCell>
+                  <TableCell className="text-right font-medium">{fmtNumber(r.total_tokens)}</TableCell>
                   <TableCell className="text-right">{fmtUSD(r.cost_usd)}</TableCell>
                 </TableRow>
               ))}

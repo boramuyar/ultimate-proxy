@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogBody,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -59,7 +60,7 @@ export default function Access(_: PageProps) {
           <Empty>No tenants yet.</Empty>
         </Card>
       ) : (
-        <div className="grid gap-5">
+        <div className="grid gap-6">
           {dir.tenants.map((t) => (
             <TenantCard key={t.id} tenant={t} apps={dir.apps.filter((a) => a.tenant_id === t.id)} />
           ))}
@@ -73,8 +74,8 @@ function TenantCard({ tenant, apps }: { tenant: Tenant; apps: Application[] }) {
   return (
     <Card>
       <CardHeader className="items-center">
-        <CardTitle className="text-[13px]">{tenant.name}</CardTitle>
-        <span className="text-[11px] text-muted-foreground">
+        <CardTitle className="text-base font-semibold">{tenant.name}</CardTitle>
+        <span className="font-mono text-xs text-faint">
           {tenant.id} · {apps.length} app{apps.length === 1 ? "" : "s"}
         </span>
       </CardHeader>
@@ -105,7 +106,7 @@ function AddApp({ tenantId }: { tenantId: string }) {
   }
 
   return (
-    <form onSubmit={submit} className="bg-muted/50 px-4 py-3">
+    <form onSubmit={submit} className="border-t bg-[#fafafa] px-5 py-3">
       <ErrorBox error={error} />
       <div className="flex flex-wrap items-center gap-3">
         <Input aria-label="New application name" className="w-56 bg-card" value={name} onChange={(e) => setName(e.target.value)} placeholder="new application" />
@@ -149,24 +150,24 @@ function AppKeys({ app }: { app: Application }) {
   }
 
   return (
-    <div className="border-b border-strong">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+    <div className="border-t">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[13px] font-bold">{app.name}</span>
-          {app.can_assert_users ? <Badge variant="info">names its users</Badge> : <Badge variant="muted">untrusted client</Badge>}
-          <span className="text-[11px] text-muted-foreground">{app.id}</span>
+          <span className="font-medium">{app.name}</span>
+          {app.can_assert_users ? <Badge variant="info">Names its users</Badge> : <Badge variant="muted">Untrusted client</Badge>}
+          <span className="font-mono text-xs text-faint">{app.id}</span>
         </div>
         <Button variant="outline" size="sm" onClick={createKey}>
           <KeyRound /> New key
         </Button>
       </div>
-      <div className="px-4">
+      <div className="px-5">
         <ErrorBox error={error ?? keys.error} />
       </div>
       {created?.key && (
-        <div className="mx-4 mb-3 grid gap-2 border border-good bg-good-bg p-3">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-good">Copy this key now. It won't be shown again.</span>
-          <code className="break-all bg-card px-2 py-1.5 text-[13px]">{created.key}</code>
+        <div className="mx-5 mb-3 grid gap-2 rounded-lg border border-[#b8e6c6] bg-good-bg p-3">
+          <span className="text-[13px] font-medium text-good">Copy this key now. It won't be shown again.</span>
+          <code className="break-all rounded-md border bg-card px-2.5 py-1.5 font-mono text-[13px]">{created.key}</code>
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -189,7 +190,7 @@ function AppKeys({ app }: { app: Application }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-4">Key</TableHead>
+              <TableHead>Key</TableHead>
               <TableHead>Created</TableHead>
               <TableHead>Status</TableHead>
               <TableHead />
@@ -198,20 +199,22 @@ function AppKeys({ app }: { app: Application }) {
           <TableBody>
             {keys.data!.map((k) => (
               <TableRow key={k.id}>
-                <TableCell className="pl-4">{k.prefix}…</TableCell>
+                <TableCell className="font-mono text-[13px]">{k.prefix}…</TableCell>
                 <TableCell>{fmtTime(k.created_at)}</TableCell>
-                <TableCell>{k.revoked_at ? <Badge variant="muted">revoked {fmtTime(k.revoked_at)}</Badge> : <Badge variant="good">active</Badge>}</TableCell>
+                <TableCell>{k.revoked_at ? <Badge variant="muted">Revoked {fmtTime(k.revoked_at)}</Badge> : <Badge variant="good">Active</Badge>}</TableCell>
                 <TableCell className="text-right">
                   {!k.revoked_at && (
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
-                        <Button variant="destructive" size="sm">
+                        <Button variant="outline" size="sm" className="text-critical hover:bg-critical-bg">
                           Revoke
                         </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent>
-                        <AlertDialogTitle>Revoke {k.prefix}…?</AlertDialogTitle>
-                        <AlertDialogDescription>Requests from {app.name} using this key will fail immediately. This can't be undone.</AlertDialogDescription>
+                        <AlertDialogBody>
+                          <AlertDialogTitle>Revoke {k.prefix}…?</AlertDialogTitle>
+                          <AlertDialogDescription>Requests from {app.name} using this key will fail immediately. This can't be undone.</AlertDialogDescription>
+                        </AlertDialogBody>
                         <AlertDialogFooter>
                           <AlertDialogCancel>Cancel</AlertDialogCancel>
                           <AlertDialogAction onClick={() => revoke(k)}>Revoke key</AlertDialogAction>

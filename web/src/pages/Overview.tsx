@@ -1,9 +1,8 @@
 import type { ReactElement } from "react";
-import { ArrowRight } from "lucide-react";
+import { AlertCircle, ArrowRight } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, type UsageRow } from "@/api";
 import type { PageProps } from "@/App";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -41,9 +40,12 @@ export default function Overview({ range, setRange }: PageProps) {
       <ErrorBox error={error} />
 
       {open.length > 0 && (
-        <div className="mb-5 flex flex-wrap items-center gap-3 border border-strong bg-card px-4 py-3">
-          <Badge variant="critical">{open.length} open</Badge>
-          <span className="min-w-0 flex-1 truncate font-sans text-[13.5px]">{open[0].title}</span>
+        <div className="mb-6 flex flex-wrap items-center gap-3 rounded-lg border border-[#ffd1d1] bg-critical-bg/60 px-4 py-3">
+          <AlertCircle className="size-4 shrink-0 text-critical" />
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-medium">{open.length === 1 ? "1 open insight" : `${open.length} open insights`}.</span>{" "}
+            <span className="text-muted-foreground">{open[0].title}</span>
+          </span>
           <Button asChild variant="outline" size="sm">
             <a href="#/insights">
               Review insights <ArrowRight />
@@ -63,19 +65,19 @@ export default function Overview({ range, setRange }: PageProps) {
         />
       </StatGrid>
 
-      <div className="mb-5 grid gap-5 lg:grid-cols-2">
+      <div className="mb-6 grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Tokens / {gran}</CardTitle>
+            <CardTitle>Tokens per {gran}</CardTitle>
             <Legend items={TOKEN_SERIES.map((s) => ({ label: s.label, color: s.color }))} />
           </CardHeader>
           <CardContent>
             <Chart>
               <AreaChart data={points} margin={{ left: 0, right: 8, top: 8 }}>
                 <CartesianGrid vertical={false} />
-                <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: "var(--strong)" }} minTickGap={28} />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={28} />
                 <YAxis tickFormatter={fmtNumber} tickLine={false} axisLine={false} width={44} />
-                <Tooltip content={<ChartTooltip format={fmtNumber} />} cursor={{ stroke: "var(--strong)", strokeDasharray: "3 3" }} />
+                <Tooltip content={<ChartTooltip format={fmtNumber} />} cursor={{ stroke: "var(--input)" }} />
                 {TOKEN_SERIES.map((s) => (
                   <Area
                     key={s.key}
@@ -84,9 +86,9 @@ export default function Overview({ range, setRange }: PageProps) {
                     name={s.label}
                     stackId="t"
                     stroke={s.color}
-                    strokeWidth={2}
+                    strokeWidth={1.5}
                     fill={s.color}
-                    fillOpacity={0.14}
+                    fillOpacity={0.08}
                     isAnimationActive={false}
                     activeDot={{ r: 4, stroke: "var(--card)", strokeWidth: 2 }}
                   />
@@ -97,24 +99,24 @@ export default function Overview({ range, setRange }: PageProps) {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Cost / {gran}</CardTitle>
-            <span className="text-[11px] text-muted-foreground">USD</span>
+            <CardTitle>Cost per {gran}</CardTitle>
+            <span className="text-[13px] text-muted-foreground">USD</span>
           </CardHeader>
           <CardContent>
             <Chart>
               <BarChart data={points} margin={{ left: 0, right: 8, top: 8 }}>
                 <CartesianGrid vertical={false} />
-                <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: "var(--strong)" }} minTickGap={28} />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={28} />
                 <YAxis tickFormatter={(v) => fmtUSD(Number(v))} tickLine={false} axisLine={false} width={56} />
-                <Tooltip content={<ChartTooltip format={fmtUSD} />} cursor={{ fill: "var(--muted)" }} />
-                <Bar dataKey="cost" name="Cost" fill="var(--foreground)" maxBarSize={28} isAnimationActive={false} />
+                <Tooltip content={<ChartTooltip format={fmtUSD} />} cursor={{ fill: "var(--muted)", radius: 4 }} />
+                <Bar dataKey="cost" name="Cost" fill="var(--series-1)" radius={[3, 3, 0, 0]} maxBarSize={24} isAnimationActive={false} />
               </BarChart>
             </Chart>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2">
         <TopTable title="Top applications" rows={apps.data} kind="app" loading={apps.loading} />
         <TopTable title="Top users" rows={emails.data} kind="email" loading={emails.loading} />
       </div>
@@ -138,8 +140,8 @@ function TopTable({ title, rows, kind, loading }: { title: string; rows?: UsageR
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
-        <a href="#/usage" className="text-[11px] uppercase tracking-wider text-muted-foreground underline hover:text-foreground">
-          All usage
+        <a href="#/usage" className="flex items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground">
+          View all <ArrowRight className="size-3.5" />
         </a>
       </CardHeader>
       {top.length === 0 ? (
@@ -157,11 +159,11 @@ function TopTable({ title, rows, kind, loading }: { title: string; rows?: UsageR
           <TableBody>
             {top.map((r, i) => (
               <TableRow key={i}>
-                <TableCell className="max-w-56 truncate">
+                <TableCell className="max-w-56 truncate font-medium">
                   {kind === "app" ? (
                     <>
                       {r.group.application_name || dir.appName(r.group.application)}
-                      <span className="text-muted-foreground"> / {r.group.tenant_name || dir.tenantName(r.group.tenant)}</span>
+                      <span className="font-normal text-muted-foreground"> / {r.group.tenant_name || dir.tenantName(r.group.tenant)}</span>
                     </>
                   ) : (
                     r.group.email || <span className="text-muted-foreground">(not attributed)</span>
@@ -170,10 +172,10 @@ function TopTable({ title, rows, kind, loading }: { title: string; rows?: UsageR
                 <TableCell className="text-right">{fmtNumber(r.requests)}</TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
-                    <div className="h-2 flex-1 bg-muted">
-                      <div className="h-full bg-foreground" style={{ width: `${(100 * r.total_tokens) / max}%` }} />
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-series-1" style={{ width: `${(100 * r.total_tokens) / max}%` }} />
                     </div>
-                    <span className="w-12 text-right">{fmtNumber(r.total_tokens)}</span>
+                    <span className="w-12 text-right font-mono text-xs">{fmtNumber(r.total_tokens)}</span>
                   </div>
                 </TableCell>
                 <TableCell className="text-right">{fmtUSD(r.cost_usd)}</TableCell>

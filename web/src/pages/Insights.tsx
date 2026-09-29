@@ -8,7 +8,6 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Empty, ErrorBox, PageHeader } from "@/components/page";
 import { cacheLabel, fmtAgo, fmtNumber, fmtPct, fmtTime, fmtUSD } from "@/format";
 import { useAsync, useDirectory } from "@/hooks";
-import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<string, string> = {
   cache_prefix_unstable: "Unstable prompt prefix",
@@ -62,25 +61,25 @@ function InsightCard({ insight: i }: { insight: Insight }) {
   ];
 
   return (
-    <Card className={cn("overflow-hidden border-l-4", tone === "critical" ? "border-l-critical" : tone === "warning" ? "border-l-warning" : "border-l-good")}>
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+    <Card>
+      <div className="flex flex-wrap items-center gap-2 px-5 pt-4">
         <Badge variant={tone}>
-          <Icon /> {resolved ? "Resolved" : i.severity}
+          <Icon /> {resolved ? "Resolved" : i.severity === "critical" ? "Critical" : "Warning"}
         </Badge>
-        <Badge variant="outline">{KIND_LABEL[i.kind] ?? i.kind}</Badge>
-        <span className="ml-auto text-[11px] text-muted-foreground" title={fmtTime(i.last_seen)}>
+        <Badge variant="muted">{KIND_LABEL[i.kind] ?? i.kind}</Badge>
+        <span className="ml-auto text-[13px] text-faint" title={fmtTime(i.last_seen)}>
           {resolved && i.resolved_at ? `resolved ${fmtAgo(i.resolved_at)}` : `last seen ${fmtAgo(i.last_seen)}`}
         </span>
       </div>
-      <div className="grid gap-2 px-4 py-3">
-        <h3 className="text-[14px] font-bold">{i.title}</h3>
-        <p className="max-w-4xl font-sans text-[13.5px] leading-relaxed">{i.detail}</p>
+      <div className="grid gap-1.5 px-5 pt-3 pb-4">
+        <h3 className="text-base font-semibold tracking-tight">{i.title}</h3>
+        <p className="max-w-4xl leading-relaxed text-muted-foreground">{i.detail}</p>
       </div>
-      <dl className="-mr-px -mb-px grid grid-cols-2 border-t border-border sm:grid-cols-3 lg:grid-cols-6">
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-t bg-[#fafafa] px-5 py-4 sm:grid-cols-3 lg:grid-cols-6">
         {facts.map(([k, v]) => (
-          <div key={k} className="border-r border-b border-border px-4 py-2">
-            <dt className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{k}</dt>
-            <dd className="text-[12.5px] break-words">
+          <div key={k} className="min-w-0">
+            <dt className="text-xs text-muted-foreground">{k[0].toUpperCase() + k.slice(1)}</dt>
+            <dd className="mt-0.5 text-[13px] break-words">
               {v}
             </dd>
           </div>

@@ -2,8 +2,9 @@ import * as React from "react";
 import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group";
 import { cn } from "@/lib/utils";
 
+// A segmented control: a gray track with the selected option raised in white.
 function ToggleGroup({ className, ...props }: React.ComponentProps<typeof ToggleGroupPrimitive.Root>) {
-  return <ToggleGroupPrimitive.Root data-slot="toggle-group" className={cn("inline-flex border border-strong bg-card", className)} {...props} />;
+  return <ToggleGroupPrimitive.Root data-slot="toggle-group" className={cn("inline-flex h-9 items-center gap-0.5 rounded-md border bg-secondary p-0.5", className)} {...props} />;
 }
 
 function ToggleGroupItem({ className, ...props }: React.ComponentProps<typeof ToggleGroupPrimitive.Item>) {
@@ -11,7 +12,7 @@ function ToggleGroupItem({ className, ...props }: React.ComponentProps<typeof To
     <ToggleGroupPrimitive.Item
       data-slot="toggle-group-item"
       className={cn(
-        "h-8 cursor-pointer border-l border-strong px-3 font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground outline-none first:border-l-0 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=on]:bg-foreground data-[state=on]:text-background data-[state=on]:border-l-muted-foreground",
+        "h-full cursor-pointer rounded-[5px] px-3 text-[13px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_1px_rgba(0,0,0,0.06)]",
         className,
       )}
       {...props}

@@ -20,7 +20,7 @@ const GROUPS = [
     statuses: ["miss_instructions_dynamic", "miss_instructions_changed", "miss_tools_reordered", "miss_tools_changed", "miss_history_rewritten"],
   },
   { key: "provider", label: "Provider missed", color: "var(--critical)", statuses: ["miss_unexpected"] },
-  { key: "expected", label: "Expected miss", color: "var(--input)", statuses: ["miss_new_prefix", "miss_too_short", "unknown"] },
+  { key: "expected", label: "Expected miss", color: "#d4d4d4", statuses: ["miss_new_prefix", "miss_too_short", "unknown"] },
 ];
 
 interface AppCache {
@@ -46,7 +46,7 @@ export default function Cache({ range, setRange }: PageProps) {
       </PageHeader>
       <ErrorBox error={rows.error} />
 
-      <Card className="mb-5">
+      <Card className="mb-6">
         <CardHeader>
           <CardTitle>By application</CardTitle>
           <Legend items={GROUPS.map((g) => ({ label: g.label, color: g.color }))} />
@@ -71,14 +71,14 @@ export default function Cache({ range, setRange }: PageProps) {
                 return (
                   <TableRow key={a.key}>
                     <TableCell>
-                      <b>{a.app}</b>
+                      <span className="font-medium">{a.app}</span>
                       <span className="text-muted-foreground"> / {a.tenant}</span>
                     </TableCell>
                     <TableCell className="text-right">{fmtNumber(a.requests)}</TableCell>
-                    <TableCell className={cn("text-right font-bold", rate < 0.2 && "text-critical")}>{fmtPct(rate)}</TableCell>
+                    <TableCell className={cn("text-right font-medium", rate < 0.2 && "text-critical")}>{fmtPct(rate)}</TableCell>
                     <TableCell>
                       <div
-                        className="flex h-3 gap-px bg-card"
+                        className="flex h-2 gap-0.5 overflow-hidden rounded-full"
                         role="img"
                         aria-label={GROUPS.map((g) => `${g.label}: ${groupCount(a, g.statuses)}`).join(", ")}
                       >
@@ -112,8 +112,8 @@ export default function Cache({ range, setRange }: PageProps) {
                   <TableCell className="w-56">
                     <Badge variant={info.tone === "good" ? "good" : info.tone === "bad" ? "critical" : info.tone === "warn" ? "warning" : "muted"}>{info.label}</Badge>
                   </TableCell>
-                  <TableCell className="w-56 text-muted-foreground">{s}</TableCell>
-                  <TableCell className="font-sans text-[13px] whitespace-normal">{info.help}</TableCell>
+                  <TableCell className="w-56 font-mono text-xs text-muted-foreground">{s}</TableCell>
+                  <TableCell className="whitespace-normal text-muted-foreground">{info.help}</TableCell>
                 </TableRow>
               ))}
           </TableBody>

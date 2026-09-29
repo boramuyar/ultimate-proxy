@@ -65,13 +65,13 @@ function PriceTable({ prices }: { prices: Price[] }) {
       <TableBody>
         {prices.map((p) => (
           <TableRow key={p.id}>
-            <TableCell className="font-bold">{p.model}</TableCell>
+            <TableCell className="font-mono text-[13px]">{p.model}</TableCell>
             <TableCell className="text-right">{money(p.input)}</TableCell>
             <TableCell className="text-right">{money(p.cached_input)}</TableCell>
             <TableCell className="text-right">{money(p.cache_write)}</TableCell>
             <TableCell className="text-right">{money(p.output)}</TableCell>
             <TableCell>{new Date(p.effective_from).getFullYear() < 1900 ? "always" : fmtTime(p.effective_from)}</TableCell>
-            <TableCell className="text-right">{new Date(p.effective_from).getTime() > now && <Badge variant="info">scheduled</Badge>}</TableCell>
+            <TableCell className="text-right">{new Date(p.effective_from).getTime() > now && <Badge variant="info">Scheduled</Badge>}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -112,14 +112,14 @@ function AddPrice({ onAdded }: { onAdded: () => void }) {
   const valid = f.model.trim() && f.input.trim() !== "" && f.output.trim() !== "";
   const num = { type: "number", min: "0", step: "any" } as const;
   return (
-    <Card className="mb-5">
+    <Card className="mb-6">
       <CardHeader className="flex-col items-stretch gap-1">
         <CardTitle>Add a price</CardTitle>
         <CardDescription>
           Model is an alias (smart), an upstream model (gpt-5) or provider/model (openai/gpt-5). Cached input and cache write default to the input price.
         </CardDescription>
       </CardHeader>
-      <form onSubmit={submit} className="grid gap-3 p-4">
+      <form onSubmit={submit} className="grid gap-3 px-5 pb-5">
         <ErrorBox error={error} />
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr_1.3fr_auto] lg:items-end">
           <Field id="p-model" label="Model">
