@@ -1,9 +1,21 @@
+import type { ReactElement } from "react";
+import { ArrowRight } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { api, type UsageRow } from "../api";
-import type { PageProps } from "../App";
-import { Empty, ErrorBox, PageHead, RangePicker, Stat } from "../components/ui";
-import { fmtNumber, fmtPct, fmtUSD, hitRate } from "../format";
-import { RANGES, rangeBounds, useAsync, useDirectory } from "../hooks";
+import { api, type UsageRow } from "@/api";
+import type { PageProps } from "@/App";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ChartTooltip, Empty, ErrorBox, Legend, PageHeader, RangePicker, Stat, StatGrid } from "@/components/page";
+import { fmtNumber, fmtPct, fmtUSD, hitRate } from "@/format";
+import { RANGES, rangeBounds, useAsync, useDirectory } from "@/hooks";
+
+const TOKEN_SERIES = [
+  { key: "uncached", label: "Input, not cached", color: "var(--series-1)" },
+  { key: "cached", label: "Input, cached", color: "var(--series-3)" },
+  { key: "output", label: "Output", color: "var(--series-2)" },
+];
 
 export default function Overview({ range, setRange }: PageProps) {
   const [from, to] = rangeBounds(range);
@@ -18,128 +30,159 @@ export default function Overview({ range, setRange }: PageProps) {
   const t = totals.data?.[0];
   const points = fillSeries(series.data ?? [], from, to, gran);
   const error = totals.error ?? series.error ?? apps.error ?? emails.error;
+  const open = insights.data ?? [];
+  const failRate = t ? t.failed_requests / Math.max(t.requests, 1) : 0;
 
   return (
     <>
-      <PageHead title="Overview" sub={`Traffic through the proxy over the last ${RANGES[range].label}.`}>
+      <PageHeader title="Overview" description={`Traffic through the proxy over the last ${RANGES[range].label}.`}>
         <RangePicker value={range} onChange={setRange} />
-      </PageHead>
+      </PageHeader>
       <ErrorBox error={error} />
 
-      {(insights.data?.length ?? 0) > 0 && (
-        <div className="notice">
-          <span>
-            <b>{insights.data!.length}</b> open {insights.data!.length === 1 ? "insight needs" : "insights need"} attention, starting with “
-            {insights.data![0].title}”.
-          </span>
-          <a className="btn small" href="#/insights">
-            Review
-          </a>
+      {open.length > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-3 border border-strong bg-card px-4 py-3">
+          <Badge variant="critical">{open.length} open</Badge>
+          <span className="min-w-0 flex-1 truncate font-sans text-[13.5px]">{open[0].title}</span>
+          <Button asChild variant="outline" size="sm">
+            <a href="#/insights">
+              Review insights <ArrowRight />
+            </a>
+          </Button>
         </div>
       )}
 
-      <div className="grid stats">
-        <Stat label="Requests" value={fmtNumber(t?.requests ?? 0)} hint={t ? `${fmtPct(t.failed_requests / Math.max(t.requests, 1))} failed` : " "} />
+      <StatGrid>
+        <Stat label="Requests" value={fmtNumber(t?.requests ?? 0)} hint={`${fmtPct(failRate)} failed`} />
+        <Stat label="Tokens" value={fmtNumber(t?.total_tokens ?? 0)} hint={t ? `${fmtNumber(t.input_tokens)} in / ${fmtNumber(t.output_tokens)} out` : "—"} />
+        <Stat label="Est. cost" value={fmtUSD(t?.cost_usd ?? 0)} hint="from the prices table" />
         <Stat
-          label="Tokens"
-          value={fmtNumber(t?.total_tokens ?? 0)}
-          hint={t ? `${fmtNumber(t.input_tokens)} in · ${fmtNumber(t.output_tokens)} out` : " "}
-        />
-        <Stat label="Estimated cost" value={fmtUSD(t?.cost_usd ?? 0)} hint="From the prices table" />
-        <Stat
-          label="Prompt cache hit rate"
+          label="Cache hit rate"
           value={fmtPct(hitRate(t?.cached_input_tokens ?? 0, t?.input_tokens ?? 0))}
-          hint={t ? `${fmtNumber(t.cached_input_tokens)} input tokens cached` : " "}
+          hint={`${fmtNumber(t?.cached_input_tokens ?? 0)} input tokens cached`}
         />
+      </StatGrid>
+
+      <div className="mb-5 grid gap-5 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Tokens / {gran}</CardTitle>
+            <Legend items={TOKEN_SERIES.map((s) => ({ label: s.label, color: s.color }))} />
+          </CardHeader>
+          <CardContent>
+            <Chart>
+              <AreaChart data={points} margin={{ left: 0, right: 8, top: 8 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: "var(--strong)" }} minTickGap={28} />
+                <YAxis tickFormatter={fmtNumber} tickLine={false} axisLine={false} width={44} />
+                <Tooltip content={<ChartTooltip format={fmtNumber} />} cursor={{ stroke: "var(--strong)", strokeDasharray: "3 3" }} />
+                {TOKEN_SERIES.map((s) => (
+                  <Area
+                    key={s.key}
+                    type="linear"
+                    dataKey={s.key}
+                    name={s.label}
+                    stackId="t"
+                    stroke={s.color}
+                    strokeWidth={2}
+                    fill={s.color}
+                    fillOpacity={0.14}
+                    isAnimationActive={false}
+                    activeDot={{ r: 4, stroke: "var(--card)", strokeWidth: 2 }}
+                  />
+                ))}
+              </AreaChart>
+            </Chart>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Cost / {gran}</CardTitle>
+            <span className="text-[11px] text-muted-foreground">USD</span>
+          </CardHeader>
+          <CardContent>
+            <Chart>
+              <BarChart data={points} margin={{ left: 0, right: 8, top: 8 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: "var(--strong)" }} minTickGap={28} />
+                <YAxis tickFormatter={(v) => fmtUSD(Number(v))} tickLine={false} axisLine={false} width={56} />
+                <Tooltip content={<ChartTooltip format={fmtUSD} />} cursor={{ fill: "var(--muted)" }} />
+                <Bar dataKey="cost" name="Cost" fill="var(--foreground)" maxBarSize={28} isAnimationActive={false} />
+              </BarChart>
+            </Chart>
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="grid two">
-        <div className="panel">
-          <h2>Tokens</h2>
-          <Chart>
-            <AreaChart data={points} margin={{ left: 0, right: 8, top: 4 }}>
-              <CartesianGrid vertical={false} />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} />
-              <YAxis tickFormatter={fmtNumber} tickLine={false} axisLine={false} width={48} />
-              <Tooltip formatter={(v) => fmtNumber(Number(v))} />
-              <Area type="monotone" dataKey="uncached" name="Input (not cached)" stackId="t" stroke="var(--chart-1)" fill="var(--chart-1)" fillOpacity={0.25} />
-              <Area type="monotone" dataKey="cached" name="Input (cached)" stackId="t" stroke="var(--chart-2)" fill="var(--chart-2)" fillOpacity={0.25} />
-              <Area type="monotone" dataKey="output" name="Output" stackId="t" stroke="var(--chart-3)" fill="var(--chart-3)" fillOpacity={0.25} />
-            </AreaChart>
-          </Chart>
-        </div>
-        <div className="panel">
-          <h2>Cost</h2>
-          <Chart>
-            <BarChart data={points} margin={{ left: 0, right: 8, top: 4 }}>
-              <CartesianGrid vertical={false} />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} />
-              <YAxis tickFormatter={(v) => fmtUSD(Number(v))} tickLine={false} axisLine={false} width={56} />
-              <Tooltip formatter={(v) => fmtUSD(Number(v))} cursor={{ fill: "var(--panel-2)" }} />
-              <Bar dataKey="cost" name="Cost" fill="var(--chart-1)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </Chart>
-        </div>
-      </div>
-
-      <div className="grid two">
-        <TopTable title="Top applications" rows={apps.data} kind="app" />
-        <TopTable title="Top users" rows={emails.data} kind="email" />
+      <div className="grid gap-5 lg:grid-cols-2">
+        <TopTable title="Top applications" rows={apps.data} kind="app" loading={apps.loading} />
+        <TopTable title="Top users" rows={emails.data} kind="email" loading={emails.loading} />
       </div>
     </>
   );
 }
 
-function Chart({ children }: { children: React.ReactElement }) {
+function Chart({ children }: { children: ReactElement }) {
   return (
-    <div style={{ width: "100%", height: 220 }}>
+    <div className="h-56 w-full">
       <ResponsiveContainer>{children}</ResponsiveContainer>
     </div>
   );
 }
 
-function TopTable({ title, rows, kind }: { title: string; rows?: UsageRow[]; kind: "app" | "email" }) {
+function TopTable({ title, rows, kind, loading }: { title: string; rows?: UsageRow[]; kind: "app" | "email"; loading: boolean }) {
   const dir = useDirectory();
   const top = (rows ?? []).slice(0, 8);
+  const max = Math.max(...top.map((r) => r.total_tokens), 1);
   return (
-    <div className="panel">
-      <h2>{title}</h2>
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <a href="#/usage" className="text-[11px] uppercase tracking-wider text-muted-foreground underline hover:text-foreground">
+          All usage
+        </a>
+      </CardHeader>
       {top.length === 0 ? (
-        <Empty>No traffic in this range.</Empty>
+        <Empty>{loading ? "Loading…" : "No traffic in this range."}</Empty>
       ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>{kind === "app" ? "Application" : "Email"}</th>
-                <th className="num">Requests</th>
-                <th className="num">Tokens</th>
-                <th className="num">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {top.map((r, i) => (
-                <tr key={i}>
-                  <td>
-                    {kind === "app" ? (
-                      <>
-                        {r.group.application_name || dir.appName(r.group.application)}{" "}
-                        <span className="faint">· {r.group.tenant_name || dir.tenantName(r.group.tenant)}</span>
-                      </>
-                    ) : (
-                      r.group.email || <span className="faint">not attributed</span>
-                    )}
-                  </td>
-                  <td className="num">{fmtNumber(r.requests)}</td>
-                  <td className="num">{fmtNumber(r.total_tokens)}</td>
-                  <td className="num">{fmtUSD(r.cost_usd)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{kind === "app" ? "Application" : "Email"}</TableHead>
+              <TableHead className="text-right">Req</TableHead>
+              <TableHead className="w-[30%]">Tokens</TableHead>
+              <TableHead className="text-right">Cost</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {top.map((r, i) => (
+              <TableRow key={i}>
+                <TableCell className="max-w-56 truncate">
+                  {kind === "app" ? (
+                    <>
+                      {r.group.application_name || dir.appName(r.group.application)}
+                      <span className="text-muted-foreground"> / {r.group.tenant_name || dir.tenantName(r.group.tenant)}</span>
+                    </>
+                  ) : (
+                    r.group.email || <span className="text-muted-foreground">(not attributed)</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-right">{fmtNumber(r.requests)}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 flex-1 bg-muted">
+                      <div className="h-full bg-foreground" style={{ width: `${(100 * r.total_tokens) / max}%` }} />
+                    </div>
+                    <span className="w-12 text-right">{fmtNumber(r.total_tokens)}</span>
+                  </div>
+                </TableCell>
+                <TableCell className="text-right">{fmtUSD(r.cost_usd)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -154,7 +197,7 @@ function fillSeries(rows: UsageRow[], from: Date, to: Date, gran: "hour" | "day"
     const r = byBucket.get(ts);
     const d = new Date(ts);
     out.push({
-      label: gran === "hour" ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      label: gran === "hour" ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false }) : d.toLocaleDateString(undefined, { month: "short", day: "2-digit" }),
       uncached: r ? r.input_tokens - r.cached_input_tokens : 0,
       cached: r?.cached_input_tokens ?? 0,
       output: r?.output_tokens ?? 0,

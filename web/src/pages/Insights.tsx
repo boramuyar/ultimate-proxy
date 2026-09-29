@@ -1,9 +1,14 @@
 import { useState } from "react";
-import { api, type Insight } from "../api";
-import type { PageProps } from "../App";
-import { Empty, ErrorBox, PageHead, Segmented } from "../components/ui";
-import { cacheLabel, fmtAgo, fmtNumber, fmtPct, fmtTime, fmtUSD } from "../format";
-import { useAsync, useDirectory } from "../hooks";
+import { AlertOctagon, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { api, type Insight } from "@/api";
+import type { PageProps } from "@/App";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Empty, ErrorBox, PageHeader } from "@/components/page";
+import { cacheLabel, fmtAgo, fmtNumber, fmtPct, fmtTime, fmtUSD } from "@/format";
+import { useAsync, useDirectory } from "@/hooks";
+import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<string, string> = {
   cache_prefix_unstable: "Unstable prompt prefix",
@@ -20,25 +25,24 @@ export default function Insights(_: PageProps) {
 
   return (
     <>
-      <PageHead title="Insights" sub="Problems the proxy noticed in live traffic. Each one opens when a rate crosses its threshold and resolves when it recovers.">
-        <Segmented
-          label="Status"
-          value={status}
-          onChange={setStatus}
-          options={[
-            { value: "open", label: "Open" },
-            { value: "resolved", label: "Resolved" },
-            { value: "all", label: "All" },
-          ]}
-        />
-      </PageHead>
+      <PageHeader title="Insights" description="Problems the proxy noticed in live traffic. Each opens when a rate crosses its threshold and resolves when it recovers.">
+        <ToggleGroup type="single" value={status} onValueChange={(v) => v && setStatus(v as Status)} aria-label="Status">
+          <ToggleGroupItem value="open">Open</ToggleGroupItem>
+          <ToggleGroupItem value="resolved">Resolved</ToggleGroupItem>
+          <ToggleGroupItem value="all">All</ToggleGroupItem>
+        </ToggleGroup>
+      </PageHeader>
       <ErrorBox error={list.error} />
       {!list.data?.length ? (
-        <div className="panel">
+        <Card>
           <Empty>{list.loading ? "Loading…" : status === "open" ? "Nothing needs attention right now." : "No insights yet."}</Empty>
-        </div>
+        </Card>
       ) : (
-        list.data.map((i) => <InsightCard key={i.id} insight={i} />)
+        <div className="grid gap-4">
+          {list.data.map((i) => (
+            <InsightCard key={i.id} insight={i} />
+          ))}
+        </div>
       )}
     </>
   );
@@ -46,42 +50,43 @@ export default function Insights(_: PageProps) {
 
 function InsightCard({ insight: i }: { insight: Insight }) {
   const dir = useDirectory();
-  const tone = i.status === "resolved" ? "good" : i.severity === "critical" ? "bad" : "warn";
+  const resolved = i.status === "resolved";
+  const tone = resolved ? "good" : i.severity === "critical" ? "critical" : "warning";
+  const Icon = resolved ? CheckCircle2 : i.severity === "critical" ? AlertOctagon : AlertTriangle;
+  const facts: [string, string][] = [
+    ["application", dir.appName(i.application_id)],
+    ["tenant", dir.tenantName(i.tenant_id)],
+    ["model", i.model],
+    ["since", fmtTime(i.first_seen)],
+    ...evidence(i.evidence),
+  ];
+
   return (
-    <div className="panel insight" style={{ marginBottom: 12 }}>
-      <div className="insight-head">
-        <div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
-            <span className={`badge ${tone}`}>{i.status === "resolved" ? "Resolved" : i.severity === "critical" ? "Critical" : "Warning"}</span>
-            <span className="badge">{KIND_LABEL[i.kind] ?? i.kind}</span>
+    <Card className={cn("overflow-hidden border-l-4", tone === "critical" ? "border-l-critical" : tone === "warning" ? "border-l-warning" : "border-l-good")}>
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+        <Badge variant={tone}>
+          <Icon /> {resolved ? "Resolved" : i.severity}
+        </Badge>
+        <Badge variant="outline">{KIND_LABEL[i.kind] ?? i.kind}</Badge>
+        <span className="ml-auto text-[11px] text-muted-foreground" title={fmtTime(i.last_seen)}>
+          {resolved && i.resolved_at ? `resolved ${fmtAgo(i.resolved_at)}` : `last seen ${fmtAgo(i.last_seen)}`}
+        </span>
+      </div>
+      <div className="grid gap-2 px-4 py-3">
+        <h3 className="text-[14px] font-bold">{i.title}</h3>
+        <p className="max-w-4xl font-sans text-[13.5px] leading-relaxed">{i.detail}</p>
+      </div>
+      <dl className="-mr-px -mb-px grid grid-cols-2 border-t border-border sm:grid-cols-3 lg:grid-cols-6">
+        {facts.map(([k, v]) => (
+          <div key={k} className="border-r border-b border-border px-4 py-2">
+            <dt className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{k}</dt>
+            <dd className="text-[12.5px] break-words">
+              {v}
+            </dd>
           </div>
-          <h3>{i.title}</h3>
-        </div>
-        <span className="faint" style={{ whiteSpace: "nowrap" }} title={fmtTime(i.last_seen)}>
-          {i.status === "resolved" && i.resolved_at ? `resolved ${fmtAgo(i.resolved_at)}` : `seen ${fmtAgo(i.last_seen)}`}
-        </span>
-      </div>
-      <div>{i.detail}</div>
-      <div className="kv">
-        <span>
-          Application <b>{dir.appName(i.application_id)}</b>
-        </span>
-        <span>
-          Tenant <b>{dir.tenantName(i.tenant_id)}</b>
-        </span>
-        <span>
-          Model <b>{i.model}</b>
-        </span>
-        <span>
-          Since <b>{fmtTime(i.first_seen)}</b>
-        </span>
-        {evidence(i.evidence).map(([k, v]) => (
-          <span key={k}>
-            {k} <b>{v}</b>
-          </span>
         ))}
-      </div>
-    </div>
+      </dl>
+    </Card>
   );
 }
 
@@ -89,22 +94,22 @@ function InsightCard({ insight: i }: { insight: Insight }) {
 function evidence(e: Record<string, unknown>): [string, string][] {
   const out: [string, string][] = [];
   const num = (k: string) => (typeof e[k] === "number" ? (e[k] as number) : undefined);
-  if (e.window) out.push(["Window", String(e.window)]);
-  if (num("requests") !== undefined) out.push(["Requests", fmtNumber(num("requests")!)]);
-  if (num("rate") !== undefined) out.push(["Rate", fmtPct(num("rate")!)]);
-  if (num("missed_cached_tokens")) out.push(["Tokens that should have been cached", fmtNumber(num("missed_cached_tokens")!)]);
-  if (num("missed_savings_usd")) out.push(["Missed savings", fmtUSD(num("missed_savings_usd")!)]);
+  if (e.window) out.push(["window", String(e.window)]);
+  if (num("requests") !== undefined) out.push(["requests", fmtNumber(num("requests")!)]);
+  if (num("rate") !== undefined) out.push(["rate", fmtPct(num("rate")!)]);
+  if (num("missed_cached_tokens")) out.push(["tokens not cached", fmtNumber(num("missed_cached_tokens")!)]);
+  if (num("missed_savings_usd")) out.push(["missed savings", fmtUSD(num("missed_savings_usd")!)]);
   if (e.reasons && typeof e.reasons === "object") {
     const parts = Object.entries(e.reasons as Record<string, number>)
       .sort((a, b) => b[1] - a[1])
-      .map(([s, n]) => `${cacheLabel(s)} ${n}`);
-    if (parts.length) out.push(["Causes", parts.join(", ")]);
+      .map(([s, n]) => `${cacheLabel(s)} ×${n}`);
+    if (parts.length) out.push(["causes", parts.join(", ")]);
   }
   if (e.error_codes && typeof e.error_codes === "object") {
     const parts = Object.entries(e.error_codes as Record<string, number>)
       .sort((a, b) => b[1] - a[1])
-      .map(([c, n]) => `${c || "unknown"} ${n}`);
-    if (parts.length) out.push(["Errors", parts.join(", ")]);
+      .map(([c, n]) => `${c || "unknown"} ×${n}`);
+    if (parts.length) out.push(["errors", parts.join(", ")]);
   }
   return out;
 }

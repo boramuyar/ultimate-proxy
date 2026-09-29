@@ -52,7 +52,7 @@ dashboard on http://localhost:5173, which forwards `/admin` to `localhost:8080`.
 
 ## Dashboard
 
-The dashboard (`web/`, React) is a front end for the admin API:
+The dashboard (`web/`: React, Tailwind CSS and shadcn/ui components, light theme, square edges, monospace type) is a front end for the admin API. `npx shadcn add <component>` works there to add more components.
 
 - **Overview**: requests, tokens, cost and cache hit rate over 24 hours, 7 days or 30 days, with the
   top applications and users.

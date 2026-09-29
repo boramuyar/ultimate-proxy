@@ -41,7 +41,7 @@ send() { # key email instructions input [stream]
 echo "== sending traffic"
 for i in $(seq 1 12); do
   # support-bot puts a timestamp at the top of its instructions: every request misses the cache.
-  send "$support" "user$((i % 4))@acme.com" "Current time: 2026-09-29T10:$(printf %02d "$i"):00Z. $SYSTEM" "Where is my order $i?"
+  send "$support" "user$((i % 4))@acme.com" "Current time: $(date -u +%Y-%m-%dT%H:%M:%S.%NZ). $SYSTEM" "Where is my order $i?"
   # search sends the same prompt, but the provider keeps missing it.
   send "$search" "user$((i % 3))@acme.com" "NOCACHE $SYSTEM" "Find docs about topic $i"
   # writer is healthy apart from answers that get cut off.

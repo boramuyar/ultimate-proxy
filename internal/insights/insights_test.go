@@ -135,7 +135,7 @@ func TestEngineHysteresis(t *testing.T) {
 		t.Fatalf("events %v", rec.events)
 	}
 	all, _ := st.ListInsights(ctx, "")
-	if len(all) != 1 || all[0].Status != "resolved" || !strings.Contains(all[0].Detail, "server_error (3)") {
+	if len(all) != 1 || all[0].Status != "resolved" || !strings.Contains(all[0].Detail, "server_error (3)") || !strings.Contains(all[0].Title, "15%") {
 		t.Fatalf("stored %+v", all)
 	}
 }

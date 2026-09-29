@@ -1,9 +1,27 @@
 import { useState, type FormEvent } from "react";
-import { api, type ApiKey, type Application } from "../api";
-import type { PageProps } from "../App";
-import { Empty, ErrorBox, PageHead } from "../components/ui";
-import { fmtTime } from "../format";
-import { useAsync, useDirectory } from "../hooks";
+import { Copy, KeyRound, Plus } from "lucide-react";
+import { api, type ApiKey, type Application, type Tenant } from "@/api";
+import type { PageProps } from "@/App";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Empty, ErrorBox, PageHeader } from "@/components/page";
+import { fmtTime } from "@/format";
+import { useAsync, useDirectory } from "@/hooks";
 
 export default function Access(_: PageProps) {
   const dir = useDirectory();
@@ -24,39 +42,47 @@ export default function Access(_: PageProps) {
 
   return (
     <>
-      <PageHead title="Tenants & keys" sub="Every API key belongs to one application, and every application to one tenant. Usage is billed along that chain." />
-      <form className="panel" style={{ marginBottom: 16 }} onSubmit={addTenant}>
-        <ErrorBox error={error} />
-        <div className="form-row">
-          <label className="field" style={{ flex: 1, maxWidth: 360 }}>
-            New tenant
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="tenant name" />
-          </label>
-          <button className="btn primary" disabled={!name.trim()}>
-            Add tenant
-          </button>
-        </div>
-      </form>
-      {dir.tenants.length === 0 ? (
-        <div className="panel">
-          <Empty>No tenants yet.</Empty>
-        </div>
-      ) : (
-        dir.tenants.map((t) => (
-          <div className="panel" key={t.id} style={{ marginBottom: 16 }}>
-            <h2>
-              {t.name} <span className="faint mono">{t.id}</span>
-            </h2>
-            {dir.apps
-              .filter((a) => a.tenant_id === t.id)
-              .map((a) => (
-                <AppKeys key={a.id} app={a} />
-              ))}
-            <AddApp tenantId={t.id} />
+      <PageHeader title="Tenants & keys" description="Every API key belongs to one application, and every application to one tenant. Usage is attributed along that chain.">
+        <form onSubmit={addTenant} className="flex items-end gap-2">
+          <div className="grid gap-1.5">
+            <Label htmlFor="new-tenant">New tenant</Label>
+            <Input id="new-tenant" className="w-56" value={name} onChange={(e) => setName(e.target.value)} placeholder="tenant name" />
           </div>
-        ))
+          <Button type="submit" disabled={!name.trim()}>
+            <Plus /> Add
+          </Button>
+        </form>
+      </PageHeader>
+      <ErrorBox error={error} />
+      {dir.tenants.length === 0 ? (
+        <Card>
+          <Empty>No tenants yet.</Empty>
+        </Card>
+      ) : (
+        <div className="grid gap-5">
+          {dir.tenants.map((t) => (
+            <TenantCard key={t.id} tenant={t} apps={dir.apps.filter((a) => a.tenant_id === t.id)} />
+          ))}
+        </div>
       )}
     </>
+  );
+}
+
+function TenantCard({ tenant, apps }: { tenant: Tenant; apps: Application[] }) {
+  return (
+    <Card>
+      <CardHeader className="items-center">
+        <CardTitle className="text-[13px]">{tenant.name}</CardTitle>
+        <span className="text-[11px] text-muted-foreground">
+          {tenant.id} · {apps.length} app{apps.length === 1 ? "" : "s"}
+        </span>
+      </CardHeader>
+      {apps.map((a) => (
+        <AppKeys key={a.id} app={a} />
+      ))}
+      <AddApp tenantId={tenant.id} />
+    </Card>
   );
 }
 
@@ -79,20 +105,17 @@ function AddApp({ tenantId }: { tenantId: string }) {
   }
 
   return (
-    <form onSubmit={submit} style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+    <form onSubmit={submit} className="bg-muted/50 px-4 py-3">
       <ErrorBox error={error} />
-      <div className="form-row">
-        <label className="field">
-          New application
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="application name" />
-        </label>
-        <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingBottom: 8 }}>
-          <input type="checkbox" checked={trusted} onChange={(e) => setTrusted(e.target.checked)} />
+      <div className="flex flex-wrap items-center gap-3">
+        <Input aria-label="New application name" className="w-56 bg-card" value={name} onChange={(e) => setName(e.target.value)} placeholder="new application" />
+        <Label className="cursor-pointer text-foreground">
+          <Checkbox checked={trusted} onCheckedChange={(v) => setTrusted(v === true)} />
           May name its end users
-        </label>
-        <button className="btn" disabled={!name.trim()}>
-          Add application
-        </button>
+        </Label>
+        <Button type="submit" variant="outline" size="sm" disabled={!name.trim()}>
+          <Plus /> Add application
+        </Button>
       </div>
     </form>
   );
@@ -116,7 +139,6 @@ function AppKeys({ app }: { app: Application }) {
   }
 
   async function revoke(k: ApiKey) {
-    if (!window.confirm(`Revoke ${k.prefix}…? Requests using it will fail immediately.`)) return;
     setError(undefined);
     try {
       await api.revokeKey(k.id);
@@ -127,25 +149,27 @@ function AppKeys({ app }: { app: Application }) {
   }
 
   return (
-    <div className="tree-app">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <b>{app.name}</b>{" "}
-          {app.can_assert_users ? <span className="badge accent">names its users</span> : <span className="badge">untrusted client</span>}
-          <div className="faint mono">{app.id}</div>
+    <div className="border-b border-strong">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[13px] font-bold">{app.name}</span>
+          {app.can_assert_users ? <Badge variant="info">names its users</Badge> : <Badge variant="muted">untrusted client</Badge>}
+          <span className="text-[11px] text-muted-foreground">{app.id}</span>
         </div>
-        <button className="btn small" onClick={createKey}>
-          New key
-        </button>
+        <Button variant="outline" size="sm" onClick={createKey}>
+          <KeyRound /> New key
+        </Button>
       </div>
-      <ErrorBox error={error ?? keys.error} />
+      <div className="px-4">
+        <ErrorBox error={error ?? keys.error} />
+      </div>
       {created?.key && (
-        <div className="key-reveal">
-          <span>Copy this key now. It won't be shown again.</span>
-          <code>{created.key}</code>
-          <div>
-            <button
-              className="btn small"
+        <div className="mx-4 mb-3 grid gap-2 border border-good bg-good-bg p-3">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-good">Copy this key now. It won't be shown again.</span>
+          <code className="break-all bg-card px-2 py-1.5 text-[13px]">{created.key}</code>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
               onClick={() =>
                 navigator.clipboard?.writeText(created.key!).then(
                   () => setCopied(true),
@@ -153,43 +177,53 @@ function AppKeys({ app }: { app: Application }) {
                 )
               }
             >
-              {copied ? "Copied" : "Copy"}
-            </button>{" "}
-            <button className="btn small" onClick={() => setCreated(undefined)}>
+              <Copy /> {copied ? "Copied" : "Copy"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setCreated(undefined)}>
               Done
-            </button>
+            </Button>
           </div>
         </div>
       )}
       {(keys.data?.length ?? 0) > 0 && (
-        <div className="table-wrap" style={{ marginTop: 8 }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Key</th>
-                <th>Created</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {keys.data!.map((k) => (
-                <tr key={k.id}>
-                  <td className="mono">{k.prefix}…</td>
-                  <td>{fmtTime(k.created_at)}</td>
-                  <td>{k.revoked_at ? <span className="badge">revoked {fmtTime(k.revoked_at)}</span> : <span className="badge good">active</span>}</td>
-                  <td className="num">
-                    {!k.revoked_at && (
-                      <button className="btn small danger" onClick={() => revoke(k)}>
-                        Revoke
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="pl-4">Key</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {keys.data!.map((k) => (
+              <TableRow key={k.id}>
+                <TableCell className="pl-4">{k.prefix}…</TableCell>
+                <TableCell>{fmtTime(k.created_at)}</TableCell>
+                <TableCell>{k.revoked_at ? <Badge variant="muted">revoked {fmtTime(k.revoked_at)}</Badge> : <Badge variant="good">active</Badge>}</TableCell>
+                <TableCell className="text-right">
+                  {!k.revoked_at && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="sm">
+                          Revoke
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogTitle>Revoke {k.prefix}…?</AlertDialogTitle>
+                        <AlertDialogDescription>Requests from {app.name} using this key will fail immediately. This can't be undone.</AlertDialogDescription>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => revoke(k)}>Revoke key</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </div>
   );

@@ -1,72 +1,81 @@
 import { useState, type FormEvent } from "react";
-import { api, type Price } from "../api";
-import type { PageProps } from "../App";
-import { Empty, ErrorBox, PageHead, Segmented } from "../components/ui";
-import { fmtTime } from "../format";
-import { useAsync } from "../hooks";
+import { Plus } from "lucide-react";
+import { api, type Price } from "@/api";
+import type { PageProps } from "@/App";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Empty, ErrorBox, PageHeader } from "@/components/page";
+import { fmtTime } from "@/format";
+import { useAsync } from "@/hooks";
+
+type View = "current" | "history";
 
 export default function Prices(_: PageProps) {
-  const [view, setView] = useState<"current" | "history">("current");
+  const [view, setView] = useState<View>("current");
   const list = useAsync(() => api.prices(view === "current"), [view]);
 
   return (
     <>
-      <PageHead title="Prices" sub="USD per million tokens. Prices are never edited: a new price takes over from its start time, and past requests keep the cost they were charged.">
-        <Segmented
-          label="Prices shown"
-          value={view}
-          onChange={setView}
-          options={[
-            { value: "current", label: "In effect now" },
-            { value: "history", label: "History" },
-          ]}
-        />
-      </PageHead>
+      <PageHeader
+        title="Prices"
+        description="USD per million tokens. Prices are never edited: a new price takes over from its start time, and past requests keep the cost they were charged."
+      >
+        <ToggleGroup type="single" value={view} onValueChange={(v) => v && setView(v as View)} aria-label="Prices shown">
+          <ToggleGroupItem value="current">In effect</ToggleGroupItem>
+          <ToggleGroupItem value="history">History</ToggleGroupItem>
+        </ToggleGroup>
+      </PageHeader>
       <AddPrice onAdded={list.reload} />
       <ErrorBox error={list.error} />
-      <div className="panel">
+      <Card>
+        <CardHeader>
+          <CardTitle>{view === "current" ? "Prices in effect now" : "All price versions, newest first"}</CardTitle>
+        </CardHeader>
         {!list.data?.length ? (
-          <Empty>{list.loading ? "Loading…" : "No prices yet. Requests are counted, but their cost is $0 until their model has a price."}</Empty>
+          <Empty>{list.loading ? "Loading…" : "No prices yet. Requests are still counted, but cost $0 until their model has a price."}</Empty>
         ) : (
-          <PriceTable prices={view === "history" ? [...list.data].reverse() : list.data} history={view === "history"} />
+          <PriceTable prices={view === "history" ? [...list.data].reverse() : list.data} />
         )}
-      </div>
+      </Card>
     </>
   );
 }
 
-function PriceTable({ prices, history }: { prices: Price[]; history: boolean }) {
-  const money = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
+function PriceTable({ prices }: { prices: Price[] }) {
+  const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
   const now = Date.now();
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Model</th>
-            <th className="num">Input</th>
-            <th className="num">Cached input</th>
-            <th className="num">Cache write</th>
-            <th className="num">Output</th>
-            <th>Effective from</th>
-            {history && <th />}
-          </tr>
-        </thead>
-        <tbody>
-          {prices.map((p) => (
-            <tr key={p.id}>
-              <td className="mono">{p.model}</td>
-              <td className="num">{money(p.input)}</td>
-              <td className="num">{money(p.cached_input)}</td>
-              <td className="num">{money(p.cache_write)}</td>
-              <td className="num">{money(p.output)}</td>
-              <td>{new Date(p.effective_from).getFullYear() < 1900 ? "always" : fmtTime(p.effective_from)}</td>
-              {history && <td>{new Date(p.effective_from).getTime() > now && <span className="badge accent">scheduled</span>}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Model</TableHead>
+          <TableHead className="text-right">Input</TableHead>
+          <TableHead className="text-right">Cached input</TableHead>
+          <TableHead className="text-right">Cache write</TableHead>
+          <TableHead className="text-right">Output</TableHead>
+          <TableHead>Effective from</TableHead>
+          <TableHead />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {prices.map((p) => (
+          <TableRow key={p.id}>
+            <TableCell className="font-bold">{p.model}</TableCell>
+            <TableCell className="text-right">{money(p.input)}</TableCell>
+            <TableCell className="text-right">{money(p.cached_input)}</TableCell>
+            <TableCell className="text-right">{money(p.cache_write)}</TableCell>
+            <TableCell className="text-right">{money(p.output)}</TableCell>
+            <TableCell>{new Date(p.effective_from).getFullYear() < 1900 ? "always" : fmtTime(p.effective_from)}</TableCell>
+            <TableCell className="text-right">{new Date(p.effective_from).getTime() > now && <Badge variant="info">scheduled</Badge>}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -101,40 +110,50 @@ function AddPrice({ onAdded }: { onAdded: () => void }) {
   }
 
   const valid = f.model.trim() && f.input.trim() !== "" && f.output.trim() !== "";
+  const num = { type: "number", min: "0", step: "any" } as const;
   return (
-    <form className="panel" style={{ marginBottom: 16 }} onSubmit={submit}>
-      <h2>Add a price</h2>
-      <p className="sub">Model can be an alias (smart), an upstream model (gpt-5) or provider/model (openai/gpt-5). Cached input and cache write default to the input price.</p>
-      <ErrorBox error={error} />
-      <div className="form-row">
-        <label className="field">
-          Model
-          <input className="input" required value={f.model} onChange={set("model")} placeholder="gpt-5" />
-        </label>
-        <label className="field">
-          Input
-          <input className="input" required type="number" min="0" step="any" style={{ width: 100 }} value={f.input} onChange={set("input")} placeholder="1.25" />
-        </label>
-        <label className="field">
-          Cached input
-          <input className="input" type="number" min="0" step="any" style={{ width: 110 }} value={f.cached_input} onChange={set("cached_input")} placeholder="0.125" />
-        </label>
-        <label className="field">
-          Cache write
-          <input className="input" type="number" min="0" step="any" style={{ width: 110 }} value={f.cache_write} onChange={set("cache_write")} placeholder="same as input" />
-        </label>
-        <label className="field">
-          Output
-          <input className="input" required type="number" min="0" step="any" style={{ width: 100 }} value={f.output} onChange={set("output")} placeholder="10" />
-        </label>
-        <label className="field">
-          Effective from
-          <input className="input" type="datetime-local" value={f.effective_from} onChange={set("effective_from")} />
-        </label>
-        <button className="btn primary" disabled={!valid || busy}>
-          {busy ? "Adding…" : "Add price"}
-        </button>
-      </div>
-    </form>
+    <Card className="mb-5">
+      <CardHeader className="flex-col items-stretch gap-1">
+        <CardTitle>Add a price</CardTitle>
+        <CardDescription>
+          Model is an alias (smart), an upstream model (gpt-5) or provider/model (openai/gpt-5). Cached input and cache write default to the input price.
+        </CardDescription>
+      </CardHeader>
+      <form onSubmit={submit} className="grid gap-3 p-4">
+        <ErrorBox error={error} />
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr_1.3fr_auto] lg:items-end">
+          <Field id="p-model" label="Model">
+            <Input id="p-model" required value={f.model} onChange={set("model")} placeholder="gpt-5" />
+          </Field>
+          <Field id="p-in" label="Input $/M">
+            <Input id="p-in" required {...num} value={f.input} onChange={set("input")} placeholder="1.25" />
+          </Field>
+          <Field id="p-cin" label="Cached $/M">
+            <Input id="p-cin" {...num} value={f.cached_input} onChange={set("cached_input")} placeholder="= input" />
+          </Field>
+          <Field id="p-cw" label="Cache write $/M">
+            <Input id="p-cw" {...num} value={f.cache_write} onChange={set("cache_write")} placeholder="= input" />
+          </Field>
+          <Field id="p-out" label="Output $/M">
+            <Input id="p-out" required {...num} value={f.output} onChange={set("output")} placeholder="10" />
+          </Field>
+          <Field id="p-from" label="Effective from">
+            <Input id="p-from" type="datetime-local" value={f.effective_from} onChange={set("effective_from")} />
+          </Field>
+          <Button type="submit" disabled={!valid || busy}>
+            <Plus /> {busy ? "Adding…" : "Add"}
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+function Field({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      {children}
+    </div>
   );
 }

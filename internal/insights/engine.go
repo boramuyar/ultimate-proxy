@@ -248,7 +248,10 @@ func (e *Engine) Evaluate(ctx context.Context, now time.Time) {
 				changes = append(changes, change{"opened", *in})
 			case in != nil && (t.requests == 0 || (f.enough && f.rate < f.threshold/2)):
 				delete(e.open, key)
-				fill(in, &f, now)
+				// Keep the title and severity the problem had while open; the
+				// evidence shows the rate it recovered to.
+				in.Evidence = f.evidence
+				in.LastSeen = now.UTC()
 				in.Status = "resolved"
 				at := now.UTC()
 				in.ResolvedAt = &at

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import type { Application, Tenant } from "./api";
+import type { Application, Tenant } from "@/api";
 
 export interface Async<T> {
   data: T | undefined;
