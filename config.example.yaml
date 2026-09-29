@@ -1,0 +1,42 @@
+# ${VAR} references are expanded from the environment.
+listen: ":8080"
+
+# Postgres for keys and usage. Leave empty to keep everything in memory (dev only).
+database_url: "${DATABASE_URL}"
+
+# Bearer token for /admin. Leave empty to disable the admin API.
+admin_token: "${PROXY_ADMIN_TOKEN}"
+
+providers:
+  - name: openai            # speaks Open Responses natively; relayed as-is
+    type: openai
+    base_url: https://api.openai.com/v1
+    api_key: "${OPENAI_API_KEY}"
+  - name: anthropic         # translated to and from the Messages API
+    type: anthropic
+    base_url: https://api.anthropic.com
+    api_key: "${ANTHROPIC_API_KEY}"
+    default_max_tokens: 8192
+
+# Client-facing model names. Clients can also send "<provider>/<model>",
+# for example "anthropic/claude-sonnet-4-5".
+models:
+  - name: smart
+    provider: anthropic
+    upstream_model: claude-sonnet-4-5
+  - name: fast
+    provider: openai
+    upstream_model: gpt-5-mini
+
+# Optional: tenants, applications and keys to create at startup.
+bootstrap:
+  - tenant: acme
+    applications:
+      - name: support-bot
+        can_assert_users: true   # may name the end user via X-Proxy-User-Email
+        keys: ["${ACME_SUPPORT_BOT_KEY}"]
+
+usage:
+  queue_size: 100000
+  batch_size: 1000
+  flush_interval: 250ms

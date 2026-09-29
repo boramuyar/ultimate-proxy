@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: proxy_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go vet ./...
+      - name: Test
+        run: go test -race -count=1 ./...
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/proxy_test
+
+  compliance:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: proxy
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: openresponses/openresponses
+          ref: 92c12d96d7b61d6d15e2214daa5e9c6000ab6e1c
+          path: .spec
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - name: Open Responses compliance
+        run: scripts/compliance.sh .spec
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/proxy

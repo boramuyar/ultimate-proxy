@@ -1,0 +1,4 @@
+/ultimate-proxy
+/fake-upstream
+*.test
+.spec/

@@ -1,6 +1,6 @@
 # Ultimate Proxy: Design
 
-Status: proposal, not yet built. Spec target: Open Responses 2026-04-24.
+Status: phase 1 (core proxy) built; later phases proposed. Spec target: Open Responses 2026-04-24.
 
 ## 1. What it is
 
