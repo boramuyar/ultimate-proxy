@@ -13,15 +13,17 @@ import (
 // Memory is an in-process store for development and tests. Nothing survives a
 // restart.
 type Memory struct {
-	mu      sync.RWMutex
-	tenants map[string]*Tenant
-	apps    map[string]*Application
-	keys    map[string]*APIKey // by hash
-	events  []UsageEvent
+	mu       sync.RWMutex
+	tenants  map[string]*Tenant
+	apps     map[string]*Application
+	keys     map[string]*APIKey // by hash
+	events   []UsageEvent
+	insights map[string]Insight
+	prices   []Price
 }
 
 func NewMemory() *Memory {
-	return &Memory{tenants: map[string]*Tenant{}, apps: map[string]*Application{}, keys: map[string]*APIKey{}}
+	return &Memory{tenants: map[string]*Tenant{}, apps: map[string]*Application{}, keys: map[string]*APIKey{}, insights: map[string]Insight{}}
 }
 
 func (m *Memory) Close() {}
@@ -112,6 +114,19 @@ func (m *Memory) RevokeKey(_ context.Context, keyID string) error {
 	return ErrNotFound
 }
 
+func (m *Memory) ListKeys(_ context.Context, appID string) ([]APIKey, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []APIKey{}
+	for _, k := range m.keys {
+		if k.AppID == appID {
+			out = append(out, *k)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
 func (m *Memory) LookupKey(_ context.Context, hash string) (*Principal, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -180,6 +195,7 @@ func (m *Memory) QueryUsage(_ context.Context, q UsageQuery) ([]UsageRow, error)
 		r.OutputTokens += int64(e.OutputTokens)
 		r.ReasoningTokens += int64(e.ReasoningTokens)
 		r.TotalTokens += int64(e.InputTokens + e.OutputTokens)
+		r.CostUSD += e.CostUSD
 	}
 	out := make([]UsageRow, 0, len(order))
 	for _, k := range order {
@@ -201,6 +217,8 @@ func dimension(e *UsageEvent, d string) string {
 		return e.Model
 	case "provider":
 		return e.Provider
+	case "cache":
+		return e.CacheStatus
 	}
 	return ""
 }
@@ -223,4 +241,39 @@ func sortRows(rows []UsageRow) {
 		}
 		return rows[i].TotalTokens > rows[j].TotalTokens
 	})
+}
+
+func (m *Memory) SaveInsight(_ context.Context, in *Insight) error {
+	m.mu.Lock()
+	m.insights[in.ID] = *in
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Memory) ListInsights(_ context.Context, status string) ([]Insight, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []Insight{}
+	for _, in := range m.insights {
+		if status == "" || in.Status == status {
+			out = append(out, in)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastSeen.After(out[j].LastSeen) })
+	return out, nil
+}
+
+func (m *Memory) AddPrice(_ context.Context, p *Price) error {
+	m.mu.Lock()
+	m.prices = append(m.prices, *p)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Memory) ListPrices(context.Context) ([]Price, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := append([]Price{}, m.prices...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].EffectiveFrom.Before(out[j].EffectiveFrom) })
+	return out, nil
 }

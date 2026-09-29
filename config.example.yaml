@@ -8,25 +8,40 @@ database_url: "${DATABASE_URL}"
 admin_token: "${PROXY_ADMIN_TOKEN}"
 
 providers:
-  - name: openai            # speaks Open Responses natively; relayed as-is
+  # Any upstream that speaks Open Responses (OpenAI's Responses API or a
+  # compatible server). Requests and events are relayed as-is.
+  - name: openai
     type: openai
     base_url: https://api.openai.com/v1
     api_key: "${OPENAI_API_KEY}"
-  - name: anthropic         # translated to and from the Messages API
-    type: anthropic
-    base_url: https://api.anthropic.com
-    api_key: "${ANTHROPIC_API_KEY}"
-    default_max_tokens: 8192
 
 # Client-facing model names. Clients can also send "<provider>/<model>",
-# for example "anthropic/claude-sonnet-4-5".
+# for example "openai/gpt-5".
 models:
   - name: smart
-    provider: anthropic
-    upstream_model: claude-sonnet-4-5
+    provider: openai
+    upstream_model: gpt-5
   - name: fast
     provider: openai
     upstream_model: gpt-5-mini
+
+# Model prices live in the database, not here: add them with
+# POST /admin/prices (see the README).
+
+# Problem detection. Every value below is the default.
+insights:
+  disabled: false
+  cache_ttl: 5m               # how long the provider keeps a prefix cached
+  min_cacheable_tokens: 1024  # the provider's minimum cacheable prompt
+  window: 15m                 # traffic each rule looks at
+  evaluate_interval: 1m
+  min_requests: 20            # least traffic in the window before a rule fires
+  unstable_prefix_rate: 0.3   # thresholds as a fraction of requests
+  unexpected_miss_rate: 0.3
+  error_rate: 0.1
+  truncation_rate: 0.2
+  webhook_url: ""             # JSON POST when an insight opens or resolves
+  slack_webhook_url: ""       # Slack incoming webhook for the same
 
 # Optional: tenants, applications and keys to create at startup.
 bootstrap:

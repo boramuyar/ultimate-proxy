@@ -1,0 +1,58 @@
+# The whole stack: docker compose up -d --build
+#
+#   dashboard      http://localhost:3000   (sign in with PROXY_ADMIN_TOKEN)
+#   proxy          http://localhost:8080   (Open Responses API and /admin)
+#   postgres       internal only; data kept in the pgdata volume
+#   fake-upstream  internal only; the free "fake-gpt" model
+#
+# Settings come from .env (copy .env.example). Without one, the defaults
+# below are used, which are fine on your own machine but not on a server.
+name: ultimate-proxy
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: proxy
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      retries: 30
+
+  fake-upstream:
+    build: .
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/fake-upstream", "-listen", ":9090", "-api-key", "fake-key"]
+
+  proxy:
+    build: .
+    restart: unless-stopped
+    ports: ["${PROXY_PORT:-8080}:8080"]
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/proxy
+      PROXY_ADMIN_TOKEN: ${PROXY_ADMIN_TOKEN:-dev-admin-token}
+      DEMO_APP_KEY: ${DEMO_APP_KEY:-up_demo_key}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes: ["./deploy/compose/config.yaml:/etc/ultimate-proxy/config.yaml:ro"]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ultimate-proxy", "-healthcheck", "http://127.0.0.1:8080/healthz"]
+      interval: 2s
+      retries: 30
+    depends_on:
+      postgres: {condition: service_healthy}
+      fake-upstream: {condition: service_started}
+
+  dashboard:
+    build: ./web
+    restart: unless-stopped
+    ports: ["${DASHBOARD_PORT:-3000}:80"]
+    environment:
+      PROXY_URL: http://proxy:8080
+    depends_on:
+      proxy: {condition: service_healthy}
+
+volumes:
+  pgdata:

@@ -4,19 +4,12 @@ database_url: "${DATABASE_URL}"
 admin_token: "admin-test-token"
 
 providers:
-  - name: anthropic
-    type: anthropic
-    base_url: http://localhost:9090
-    api_key: fake-key
   - name: openai
     type: openai
     base_url: http://localhost:9090/v1
     api_key: fake-key
 
 models:
-  - name: fake-claude
-    provider: anthropic
-    upstream_model: claude-fake
   - name: fake-gpt
     provider: openai
     upstream_model: gpt-fake

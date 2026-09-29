@@ -1,6 +1,10 @@
 # Ultimate Proxy: Design
 
-Status: phase 1 (core proxy) built; later phases proposed. Spec target: Open Responses 2026-04-24.
+Status: phases 1 (core proxy) and 2 (cache insights, cost accounting) built; later phases proposed. Spec target: Open Responses 2026-04-24.
+
+Scope note (2026-09-29): upstreams are limited to providers that speak Open Responses (OpenAI and
+compatible servers) for now. The Anthropic adapter described below was built in phase 1 and then
+removed; git history keeps it if Anthropic support comes back.
 
 ## 1. What it is
 
@@ -132,6 +136,15 @@ matched prefix), it's an **unexpected miss**.
 
 Delivered via webhook, Slack, and email, plus Prometheus metrics for existing alerting.
 
+**As built in phase 2.** The expected-hit map lives in each proxy process rather than Redis; rates per
+replica are good enough, and a shared store can be added when cache-affinity routing (phase 3) needs
+it. Built rules: unstable prefix (with the dominant cause), unexpected miss (with missed tokens and
+dollars), error rate and truncation, over a sliding window with open/resolve hysteresis (open at the
+threshold, resolve below half of it, or when traffic stops). Latency and cost-spike baselines, the
+key/region affinity signal, and email delivery are not built yet. Prices are an append-only
+`model_prices` table managed through `/admin/prices` rather than a bundled catalog or config file:
+each row has an `effective_from`, and each request is costed with the price in effect when it ran.
+
 ## 4. Additional features I'd propose
 
 Grouped by value. **Bold** ones I'd consider near-essential for a proxy people will call "ultimate".
@@ -194,5 +207,6 @@ internal/limits/         rate limits, budgets
 internal/router/         aliases, fallbacks, affinity
 internal/store/          postgres, redis
 migrations/
-deploy/docker-compose.yml
+docker-compose.yml  (proxy, Postgres, fake upstream, dashboard)
+web/               (dashboard)
 ```

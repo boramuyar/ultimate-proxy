@@ -69,6 +69,12 @@ type UsageEvent struct {
 	LatencyMS         int
 	TTFTMS            *int
 	PromptCacheKey    string
+	CostUSD           float64
+	// CacheStatus says whether the prompt cache was hit and, if not, why
+	// (see the insights package). ExpectedCachedTokens is how many tokens
+	// should have been cached, when the same prefix was sent recently.
+	CacheStatus          string
+	ExpectedCachedTokens int
 }
 
 // Dimensions usage can be grouped and filtered by.
@@ -78,6 +84,7 @@ var UsageDimensions = map[string]string{
 	"email":       "user_email",
 	"model":       "model",
 	"provider":    "provider",
+	"cache":       "cache_status",
 }
 
 type UsageQuery struct {
@@ -120,6 +127,40 @@ type UsageRow struct {
 	OutputTokens      int64             `json:"output_tokens"`
 	ReasoningTokens   int64             `json:"reasoning_tokens"`
 	TotalTokens       int64             `json:"total_tokens"`
+	CostUSD           float64           `json:"cost_usd"`
+}
+
+// Price is what a model costs, in USD per million tokens, from EffectiveFrom
+// until a later price for the same model takes over. Prices are never edited
+// in place, so past costs stay explainable. Model matches a client-facing
+// alias, an upstream model name, or "<provider>/<upstream model>".
+type Price struct {
+	ID            string    `json:"id"`
+	Model         string    `json:"model"`
+	Input         float64   `json:"input"`
+	CachedInput   float64   `json:"cached_input"`
+	CacheWrite    float64   `json:"cache_write"`
+	Output        float64   `json:"output"`
+	EffectiveFrom time.Time `json:"effective_from"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// Insight is a problem the proxy noticed in live traffic, such as an
+// application whose prompt cache keeps missing.
+type Insight struct {
+	ID         string         `json:"id"`
+	Kind       string         `json:"kind"`
+	Severity   string         `json:"severity"` // warning or critical
+	Status     string         `json:"status"`   // open or resolved
+	TenantID   string         `json:"tenant_id"`
+	AppID      string         `json:"application_id"`
+	Model      string         `json:"model"`
+	Title      string         `json:"title"`
+	Detail     string         `json:"detail"`
+	Evidence   map[string]any `json:"evidence"`
+	FirstSeen  time.Time      `json:"first_seen"`
+	LastSeen   time.Time      `json:"last_seen"`
+	ResolvedAt *time.Time     `json:"resolved_at,omitempty"`
 }
 
 type Store interface {
@@ -130,9 +171,18 @@ type Store interface {
 	// CreateKey stores a key by hash. It is idempotent for the same hash.
 	CreateKey(ctx context.Context, appID, hash, prefix string) (*APIKey, error)
 	RevokeKey(ctx context.Context, keyID string) error
+	// ListKeys returns an application's keys, revoked ones included, oldest first.
+	ListKeys(ctx context.Context, appID string) ([]APIKey, error)
 	// LookupKey returns ErrNotFound for unknown or revoked keys.
 	LookupKey(ctx context.Context, hash string) (*Principal, error)
 	InsertUsage(ctx context.Context, events []UsageEvent) error
 	QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, error)
+	AddPrice(ctx context.Context, p *Price) error
+	// ListPrices returns every price, oldest effective first.
+	ListPrices(ctx context.Context) ([]Price, error)
+	// SaveInsight inserts or updates an insight by ID.
+	SaveInsight(ctx context.Context, in *Insight) error
+	// ListInsights returns insights with the given status ("" for all), newest first.
+	ListInsights(ctx context.Context, status string) ([]Insight, error)
 	Close()
 }

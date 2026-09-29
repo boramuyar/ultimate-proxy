@@ -52,3 +52,38 @@ CREATE INDEX IF NOT EXISTS usage_events_ts_brin ON usage_events USING brin (ts);
 CREATE INDEX IF NOT EXISTS usage_events_tenant_ts ON usage_events (tenant_id, ts);
 CREATE INDEX IF NOT EXISTS usage_events_app_ts ON usage_events (app_id, ts);
 CREATE INDEX IF NOT EXISTS usage_events_email_ts ON usage_events (user_email, ts);
+
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cost_usd double precision NOT NULL DEFAULT 0;
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cache_status text NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS expected_cached_tokens integer NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS insights (
+    id          text PRIMARY KEY,
+    kind        text NOT NULL,
+    severity    text NOT NULL,
+    status      text NOT NULL,
+    tenant_id   text NOT NULL,
+    app_id      text NOT NULL,
+    model       text NOT NULL,
+    title       text NOT NULL,
+    detail      text NOT NULL,
+    evidence    jsonb NOT NULL,
+    first_seen  timestamptz NOT NULL,
+    last_seen   timestamptz NOT NULL,
+    resolved_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS insights_status_last_seen ON insights (status, last_seen DESC);
+
+CREATE TABLE IF NOT EXISTS model_prices (
+    id             text PRIMARY KEY,
+    model          text NOT NULL,
+    input          double precision NOT NULL,
+    cached_input   double precision NOT NULL,
+    cache_write    double precision NOT NULL,
+    output         double precision NOT NULL,
+    effective_from timestamptz NOT NULL,
+    created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS model_prices_model_effective ON model_prices (model, effective_from);

@@ -28,8 +28,6 @@ func NewRouter(cfg *config.Config) (*Router, error) {
 		switch p.Type {
 		case "openai":
 			r.providers[p.Name] = provider.NewOpenAI(p.Name, p.BaseURL, p.APIKey, p.Headers, client)
-		case "anthropic":
-			r.providers[p.Name] = provider.NewAnthropic(p.Name, p.BaseURL, p.APIKey, p.Headers, p.DefaultMaxTokens, client)
 		default:
 			return nil, fmt.Errorf("unknown provider type %q", p.Type)
 		}

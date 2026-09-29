@@ -1,5 +1,5 @@
-// Command fake-upstream serves a deterministic fake of the Anthropic Messages
-// and OpenAI Responses APIs for local development and CI.
+// Command fake-upstream serves a deterministic fake of the OpenAI Responses
+// API for local development and CI.
 package main
 
 import (

@@ -29,18 +29,44 @@ type Config struct {
 
 	Providers []Provider `yaml:"providers"`
 	Models    []Model    `yaml:"models"`
+	Insights  Insights   `yaml:"insights"`
 	Bootstrap []Tenant   `yaml:"bootstrap"`
+}
+
+// Insights configures problem detection and alerting.
+type Insights struct {
+	Disabled bool `yaml:"disabled"`
+	// CacheTTL is how long a provider keeps a prompt prefix cached. A prefix
+	// sent again within it is expected to hit.
+	CacheTTL time.Duration `yaml:"cache_ttl"`
+	// MinCacheableTokens is the provider's minimum cacheable prompt size.
+	MinCacheableTokens int `yaml:"min_cacheable_tokens"`
+	// Window is how much recent traffic each rule looks at.
+	Window time.Duration `yaml:"window"`
+	// EvaluateInterval is how often rules run.
+	EvaluateInterval time.Duration `yaml:"evaluate_interval"`
+	// MinRequests is the least traffic in the window before a rule may fire.
+	MinRequests int `yaml:"min_requests"`
+
+	// Thresholds, as fractions of the window's requests. An insight opens at
+	// the threshold and resolves when the rate falls below half of it.
+	UnstablePrefixRate float64 `yaml:"unstable_prefix_rate"`
+	UnexpectedMissRate float64 `yaml:"unexpected_miss_rate"`
+	ErrorRate          float64 `yaml:"error_rate"`
+	TruncationRate     float64 `yaml:"truncation_rate"`
+
+	// WebhookURL receives a JSON POST whenever an insight opens or resolves.
+	WebhookURL string `yaml:"webhook_url"`
+	// SlackWebhookURL receives the same as a Slack message.
+	SlackWebhookURL string `yaml:"slack_webhook_url"`
 }
 
 type Provider struct {
 	Name    string            `yaml:"name"`
-	Type    string            `yaml:"type"` // openai or anthropic
+	Type    string            `yaml:"type"` // openai
 	BaseURL string            `yaml:"base_url"`
 	APIKey  string            `yaml:"api_key"`
 	Headers map[string]string `yaml:"headers"`
-	// DefaultMaxTokens is used when a request sets no max_output_tokens and
-	// the upstream requires a limit (Anthropic).
-	DefaultMaxTokens int `yaml:"default_max_tokens"`
 }
 
 // Model maps a client-facing model name to a provider and upstream model.
@@ -101,6 +127,34 @@ func (c *Config) applyDefaults() {
 	if c.Usage.FlushInterval == 0 {
 		c.Usage.FlushInterval = 250 * time.Millisecond
 	}
+	in := &c.Insights
+	if in.CacheTTL == 0 {
+		in.CacheTTL = 5 * time.Minute
+	}
+	if in.MinCacheableTokens == 0 {
+		in.MinCacheableTokens = 1024
+	}
+	if in.Window == 0 {
+		in.Window = 15 * time.Minute
+	}
+	if in.EvaluateInterval == 0 {
+		in.EvaluateInterval = time.Minute
+	}
+	if in.MinRequests == 0 {
+		in.MinRequests = 20
+	}
+	if in.UnstablePrefixRate == 0 {
+		in.UnstablePrefixRate = 0.3
+	}
+	if in.UnexpectedMissRate == 0 {
+		in.UnexpectedMissRate = 0.3
+	}
+	if in.ErrorRate == 0 {
+		in.ErrorRate = 0.1
+	}
+	if in.TruncationRate == 0 {
+		in.TruncationRate = 0.2
+	}
 }
 
 func (c *Config) validate() error {
@@ -114,9 +168,9 @@ func (c *Config) validate() error {
 		}
 		names[p.Name] = true
 		switch p.Type {
-		case "openai", "anthropic":
+		case "openai":
 		default:
-			return fmt.Errorf("provider %q: unknown type %q (want openai or anthropic)", p.Name, p.Type)
+			return fmt.Errorf("provider %q: unknown type %q (want openai)", p.Name, p.Type)
 		}
 	}
 	for _, m := range c.Models {

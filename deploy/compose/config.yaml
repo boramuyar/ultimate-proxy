@@ -1,0 +1,33 @@
+# Proxy config for the docker compose stack (docker-compose.yml at the repo
+# root). ${VAR}s come from .env next to docker-compose.yml.
+listen: ":8080"
+database_url: "${DATABASE_URL}"
+admin_token: "${PROXY_ADMIN_TOKEN}"
+
+providers:
+  # Free: a deterministic fake of the Responses API, running next to the proxy.
+  - name: fake-openai
+    type: openai
+    base_url: http://fake-upstream:9090/v1
+    api_key: fake-key
+  # Real provider. Calls to it fail until OPENAI_API_KEY is set in .env.
+  - name: openai
+    type: openai
+    base_url: https://api.openai.com/v1
+    api_key: "${OPENAI_API_KEY}"
+
+models:
+  - {name: fake-gpt, provider: fake-openai, upstream_model: gpt-fake}
+  - {name: smart, provider: openai, upstream_model: gpt-5}
+  - {name: fast, provider: openai, upstream_model: gpt-5-mini}
+
+bootstrap:
+  - tenant: demo
+    applications:
+      - name: playground
+        keys: ["${DEMO_APP_KEY}"]
+
+insights:
+  # Alert on smaller traffic than the production default, so the demo
+  # shows insights quickly.
+  min_requests: 5

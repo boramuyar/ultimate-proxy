@@ -46,6 +46,26 @@ var (
 		Help: "Usage event batches that failed to write.",
 	})
 
+	CacheRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ultimate_proxy_cache_requests_total",
+		Help: "Requests by prompt-cache status (hit, or the reason for a miss).",
+	}, []string{"tenant", "application", "model", "status"})
+
+	CacheMissedTokens = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ultimate_proxy_cache_missed_tokens_total",
+		Help: "Input tokens that should have been served from the prompt cache but were not.",
+	}, []string{"tenant", "application", "model"})
+
+	CostUSD = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ultimate_proxy_cost_usd_total",
+		Help: "Estimated spend in USD from the prices table.",
+	}, []string{"tenant", "application", "model"})
+
+	InsightsOpen = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "ultimate_proxy_insights_open",
+		Help: "Open insights by kind.",
+	}, []string{"kind"})
+
 	UsageQueueDepth = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "ultimate_proxy_usage_queue_depth",
 		Help: "Usage events waiting to be written.",
@@ -57,5 +77,6 @@ func init() {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		Requests, Tokens, Latency, TTFT, UpstreamErrors, UsageDropped, UsageWriteErrors, UsageQueueDepth,
+		CacheRequests, CacheMissedTokens, CostUSD, InsightsOpen,
 	)
 }
