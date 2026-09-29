@@ -53,10 +53,13 @@ export default function App() {
   );
 }
 
+// Logo: requests pass through the proxy, drawn as a ring on a line.
 function Logo({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden className={cn("size-5", className)}>
-      <path d="M12 2 22.5 20.5h-21Z" fill="currentColor" />
+    <svg viewBox="0 0 24 24" aria-hidden className={cn("size-6", className)}>
+      <rect width="24" height="24" rx="6" fill="currentColor" />
+      <path d="M4.5 12h3.8M15.7 12h3.8" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="12" r="3.7" fill="none" stroke="#fff" strokeWidth="2" />
     </svg>
   );
 }
