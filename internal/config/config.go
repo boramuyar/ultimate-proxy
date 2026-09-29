@@ -29,7 +29,48 @@ type Config struct {
 
 	Providers []Provider `yaml:"providers"`
 	Models    []Model    `yaml:"models"`
+	Prices    []Price    `yaml:"prices"`
+	Insights  Insights   `yaml:"insights"`
 	Bootstrap []Tenant   `yaml:"bootstrap"`
+}
+
+// Price is USD per million tokens. Model matches a client-facing alias, an
+// upstream model name, or "<provider>/<upstream model>". CachedInput and
+// CacheWrite default to Input when unset.
+type Price struct {
+	Model       string   `yaml:"model"`
+	Input       float64  `yaml:"input"`
+	CachedInput *float64 `yaml:"cached_input"`
+	CacheWrite  *float64 `yaml:"cache_write"`
+	Output      float64  `yaml:"output"`
+}
+
+// Insights configures problem detection and alerting.
+type Insights struct {
+	Disabled bool `yaml:"disabled"`
+	// CacheTTL is how long a provider keeps a prompt prefix cached. A prefix
+	// sent again within it is expected to hit.
+	CacheTTL time.Duration `yaml:"cache_ttl"`
+	// MinCacheableTokens is the provider's minimum cacheable prompt size.
+	MinCacheableTokens int `yaml:"min_cacheable_tokens"`
+	// Window is how much recent traffic each rule looks at.
+	Window time.Duration `yaml:"window"`
+	// EvaluateInterval is how often rules run.
+	EvaluateInterval time.Duration `yaml:"evaluate_interval"`
+	// MinRequests is the least traffic in the window before a rule may fire.
+	MinRequests int `yaml:"min_requests"`
+
+	// Thresholds, as fractions of the window's requests. An insight opens at
+	// the threshold and resolves when the rate falls below half of it.
+	UnstablePrefixRate float64 `yaml:"unstable_prefix_rate"`
+	UnexpectedMissRate float64 `yaml:"unexpected_miss_rate"`
+	ErrorRate          float64 `yaml:"error_rate"`
+	TruncationRate     float64 `yaml:"truncation_rate"`
+
+	// WebhookURL receives a JSON POST whenever an insight opens or resolves.
+	WebhookURL string `yaml:"webhook_url"`
+	// SlackWebhookURL receives the same as a Slack message.
+	SlackWebhookURL string `yaml:"slack_webhook_url"`
 }
 
 type Provider struct {
@@ -98,6 +139,34 @@ func (c *Config) applyDefaults() {
 	if c.Usage.FlushInterval == 0 {
 		c.Usage.FlushInterval = 250 * time.Millisecond
 	}
+	in := &c.Insights
+	if in.CacheTTL == 0 {
+		in.CacheTTL = 5 * time.Minute
+	}
+	if in.MinCacheableTokens == 0 {
+		in.MinCacheableTokens = 1024
+	}
+	if in.Window == 0 {
+		in.Window = 15 * time.Minute
+	}
+	if in.EvaluateInterval == 0 {
+		in.EvaluateInterval = time.Minute
+	}
+	if in.MinRequests == 0 {
+		in.MinRequests = 20
+	}
+	if in.UnstablePrefixRate == 0 {
+		in.UnstablePrefixRate = 0.3
+	}
+	if in.UnexpectedMissRate == 0 {
+		in.UnexpectedMissRate = 0.3
+	}
+	if in.ErrorRate == 0 {
+		in.ErrorRate = 0.1
+	}
+	if in.TruncationRate == 0 {
+		in.TruncationRate = 0.2
+	}
 }
 
 func (c *Config) validate() error {
@@ -122,6 +191,11 @@ func (c *Config) validate() error {
 		}
 		if !names[m.Provider] {
 			return fmt.Errorf("model %q: unknown provider %q", m.Name, m.Provider)
+		}
+	}
+	for _, p := range c.Prices {
+		if p.Model == "" || p.Input < 0 || p.Output < 0 {
+			return fmt.Errorf("price entries need a model and non-negative prices")
 		}
 	}
 	return nil

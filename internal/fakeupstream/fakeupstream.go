@@ -19,6 +19,9 @@ import (
 const (
 	TriggerFailMidstream = "FAIL_MIDSTREAM"
 	TriggerMaxTokens     = "HIT_MAX_TOKENS"
+	// TriggerNoCache in the instructions makes the prompt cache always miss,
+	// like a provider that evicted or never stored the prefix.
+	TriggerNoCache = "NOCACHE"
 )
 
 type Server struct {
@@ -57,7 +60,7 @@ func (s *Server) LastRequest() json.RawMessage {
 
 // cached reports how many prompt tokens a real prompt cache would have served.
 func (s *Server) cached(prefix string, tokens int) int {
-	if prefix == "" {
+	if prefix == "" || strings.Contains(prefix, TriggerNoCache) {
 		return 0
 	}
 	h := sha256.Sum256([]byte(prefix))

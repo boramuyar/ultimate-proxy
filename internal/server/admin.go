@@ -161,7 +161,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 			q.GroupBy = append(q.GroupBy, strings.TrimSpace(g))
 		}
 	}
-	for param, dim := range map[string]string{"tenant_id": "tenant", "application_id": "application", "email": "email", "model": "model", "provider": "provider"} {
+	for param, dim := range map[string]string{"tenant_id": "tenant", "application_id": "application", "email": "email", "model": "model", "provider": "provider", "cache_status": "cache"} {
 		if v := qs.Get(param); v != "" {
 			q.Filters[dim] = v
 		}
@@ -224,4 +224,25 @@ func (s *Server) addNames(r *http.Request, rows []store.UsageRow) error {
 		}
 	}
 	return nil
+}
+
+// listInsights serves GET /admin/insights?status=open|resolved|all (default open).
+func (s *Server) listInsights(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	switch status {
+	case "":
+		status = "open"
+	case "all":
+		status = ""
+	case "open", "resolved":
+	default:
+		openresponses.WriteError(w, openresponses.InvalidRequest("invalid_parameter", "status must be open, resolved or all", "status"))
+		return
+	}
+	list, err := s.store.ListInsights(r.Context(), status)
+	if err != nil {
+		s.adminError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }

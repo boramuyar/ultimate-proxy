@@ -59,6 +59,12 @@ func run(configPath string, log *slog.Logger) error {
 	if err := srv.Bootstrap(ctx); err != nil {
 		return err
 	}
+	if eng := srv.Insights(); eng != nil {
+		if err := eng.Load(ctx); err != nil {
+			return err
+		}
+		go eng.Run(ctx)
+	}
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Listen,

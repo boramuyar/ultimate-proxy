@@ -5,7 +5,7 @@ and meters every request by **tenant**, **application** and **end-user email**.
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
 
-## What works today (phase 1)
+## What works today (phases 1 and 2)
 
 - `POST /v1/responses`: JSON and SSE streaming, passing the Open Responses HTTP compliance tests.
 - Upstreams: any provider that speaks Open Responses (OpenAI's Responses API and compatible servers).
@@ -17,10 +17,14 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
   Postgres in batches, off the request path.
 - `GET /admin/usage` to answer "who used how many tokens", grouped by tenant, application, email, model
   or provider, optionally bucketed by hour or day.
+- Prompt-cache diagnosis on every request: whether the cache hit, and if not, why (see below).
+- Insights: problems the proxy notices in live traffic, per application and model, listed at
+  `GET /admin/insights` and posted to a webhook or Slack when they open and resolve.
+- Cost in USD from the prices in the config, on every usage event and in `/admin/usage`.
 - Prometheus metrics at `/metrics`.
 
-Not built yet: WebSocket transport, `/v1/responses/compact`, background responses, cache-miss
-insights, budgets and rate limits. They are later phases in the design doc.
+Not built yet: WebSocket transport, `/v1/responses/compact`, background responses, budgets and rate
+limits. They are later phases in the design doc.
 
 ## Run it
 
@@ -63,12 +67,57 @@ curl -s "localhost:8080/admin/usage?group_by=tenant,application,email&granularit
 
 | Parameter | Meaning |
 | --- | --- |
-| `group_by` | Comma-separated: `tenant`, `application`, `email`, `model`, `provider`, or `none`. Default `tenant`. |
+| `group_by` | Comma-separated: `tenant`, `application`, `email`, `model`, `provider`, `cache`, or `none`. Default `tenant`. |
 | `from`, `to` | RFC 3339 times. Default: the last 24 hours. |
 | `granularity` | `hour` or `day`. Default: one row per group. |
-| `tenant_id`, `application_id`, `email`, `model`, `provider` | Filters. |
+| `tenant_id`, `application_id`, `email`, `model`, `provider`, `cache_status` | Filters. |
+
+Each row also carries `cost_usd` when the model has a price in the config.
 
 Revoke a key with `DELETE /admin/keys/<key id>`.
+
+## Prompt-cache insights
+
+The proxy fingerprints the start of every prompt (instructions, tools, then each input item; only
+hashes are kept) and compares it with what the same application sent recently. Each usage event gets a
+`cache_status`:
+
+| Status | Meaning |
+| --- | --- |
+| `hit` | The provider served part of the prompt from cache. |
+| `miss_unexpected` | The same prefix was sent within `cache_ttl` but the provider still missed. |
+| `miss_instructions_dynamic` | The instructions differ from the previous request only in numbers or ids (a timestamp, a date, a request id). |
+| `miss_instructions_changed` | The instructions changed. |
+| `miss_tools_reordered` | The same tools, in a different order or with keys in a different order. |
+| `miss_tools_changed` | The tool list changed. |
+| `miss_history_rewritten` | Earlier turns of the conversation changed (summarized, trimmed, re-serialized). |
+| `miss_new_prefix` | Nothing similar was sent recently; a normal first request. |
+| `miss_too_short` | The prompt is below the provider's minimum cacheable size. |
+| `unknown` | The request uses `previous_response_id`, so the proxy can't see the prompt. |
+
+`/admin/usage?group_by=application,cache` shows the mix per application. Every minute, rules look at
+the last `window` of traffic per application and model and open an insight when a rate crosses its
+threshold, then resolve it when the rate falls below half of it:
+
+| Insight | Fires when |
+| --- | --- |
+| `cache_prefix_unstable` | Too many requests miss because the application keeps changing its prompt prefix. The insight says which change dominates and how to fix it. |
+| `cache_unexpected_miss` | Too many repeated prefixes miss anyway, with the tokens and dollars that cost. |
+| `error_rate` | Too many requests fail, with the most common error codes. |
+| `truncation` | Too many responses end incomplete at `max_output_tokens`. |
+
+```sh
+curl -s "localhost:8080/admin/insights" -H "$ADMIN"                  # open insights
+curl -s "localhost:8080/admin/insights?status=all" -H "$ADMIN"       # open and resolved
+```
+
+Set `insights.webhook_url` for a JSON POST (`{"event":"insight.opened","insight":{…}}`) or
+`insights.slack_webhook_url` for a Slack message on every open and resolve. Prometheus gets
+`ultimate_proxy_cache_requests_total{status}`, `ultimate_proxy_cache_missed_tokens_total`,
+`ultimate_proxy_cost_usd_total` and `ultimate_proxy_insights_open{kind}`.
+
+The fingerprint memory lives in each proxy process, so with several replicas each one judges only the
+traffic it sees. That is fine for rates; a shared store can come later if needed.
 
 ## Develop
 

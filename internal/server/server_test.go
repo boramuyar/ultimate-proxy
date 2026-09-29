@@ -25,6 +25,7 @@ type harness struct {
 	upstream    *fakeupstream.Server
 	store       *store.Memory
 	meter       *meter.Meter
+	srv         *Server
 }
 
 const (
@@ -47,6 +48,11 @@ providers:
   - {name: badkey, type: openai, base_url: "` + upSrv.URL + `/v1", api_key: wrong}
 models:
   - {name: gpt, provider: openai, upstream_model: gpt-fake}
+prices:
+  - {model: gpt, input: 2, cached_input: 0.5, output: 8}
+insights:
+  min_cacheable_tokens: 10
+  min_requests: 5
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +73,7 @@ models:
 	}
 	proxy := httptest.NewServer(srv.Handler())
 	t.Cleanup(proxy.Close)
-	return &harness{t: t, proxy: proxy, upstreamURL: upSrv.URL, upstream: up, store: st, meter: m}
+	return &harness{t: t, proxy: proxy, upstreamURL: upSrv.URL, upstream: up, store: st, meter: m, srv: srv}
 }
 
 func (h *harness) post(key, body string, headers ...string) *http.Response {

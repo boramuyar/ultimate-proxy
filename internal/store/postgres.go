@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -130,7 +131,7 @@ var usageColumns = []string{
 	"ts", "request_id", "tenant_id", "app_id", "key_id", "user_email", "user_source", "model", "provider",
 	"upstream_model", "stream", "status", "error_code", "http_status", "input_tokens", "cached_input_tokens",
 	"cache_write_tokens", "output_tokens", "reasoning_tokens", "usage_reported", "latency_ms", "ttft_ms",
-	"prompt_cache_key",
+	"prompt_cache_key", "cost_usd", "cache_status", "expected_cached_tokens",
 }
 
 func (p *Postgres) InsertUsage(ctx context.Context, events []UsageEvent) error {
@@ -141,7 +142,7 @@ func (p *Postgres) InsertUsage(ctx context.Context, events []UsageEvent) error {
 				e.TS, e.RequestID, e.TenantID, e.AppID, e.KeyID, e.UserEmail, e.UserSource, e.Model, e.Provider,
 				e.UpstreamModel, e.Stream, e.Status, e.ErrorCode, e.HTTPStatus, e.InputTokens, e.CachedInputTokens,
 				e.CacheWriteTokens, e.OutputTokens, e.ReasoningTokens, e.UsageReported, e.LatencyMS, e.TTFTMS,
-				e.PromptCacheKey,
+				e.PromptCacheKey, e.CostUSD, e.CacheStatus, e.ExpectedCachedTokens,
 			}, nil
 		}))
 	return err
@@ -169,7 +170,7 @@ func (p *Postgres) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, er
 		"count(*)", "count(*) FILTER (WHERE status = 'failed')",
 		"coalesce(sum(input_tokens), 0)", "coalesce(sum(cached_input_tokens), 0)",
 		"coalesce(sum(cache_write_tokens), 0)", "coalesce(sum(output_tokens), 0)",
-		"coalesce(sum(reasoning_tokens), 0)")
+		"coalesce(sum(reasoning_tokens), 0)", "coalesce(sum(cost_usd), 0)")
 	sql := "SELECT " + strings.Join(sel, ", ") + " FROM usage_events WHERE " + strings.Join(where, " AND ")
 	if len(group) > 0 {
 		sql += " GROUP BY " + strings.Join(group, ", ")
@@ -196,7 +197,7 @@ func (p *Postgres) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, er
 			dest = append(dest, &dims[i])
 		}
 		dest = append(dest, &r.Requests, &r.FailedRequests, &r.InputTokens, &r.CachedInputTokens,
-			&r.CacheWriteTokens, &r.OutputTokens, &r.ReasoningTokens)
+			&r.CacheWriteTokens, &r.OutputTokens, &r.ReasoningTokens, &r.CostUSD)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
@@ -220,4 +221,38 @@ func (p *Postgres) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, er
 func isForeignKeyViolation(err error) bool {
 	var pgErr interface{ SQLState() string }
 	return errors.As(err, &pgErr) && pgErr.SQLState() == "23503"
+}
+
+func (p *Postgres) SaveInsight(ctx context.Context, in *Insight) error {
+	evidence, err := json.Marshal(in.Evidence)
+	if err != nil {
+		return err
+	}
+	_, err = p.pool.Exec(ctx, `
+		INSERT INTO insights (id, kind, severity, status, tenant_id, app_id, model, title, detail, evidence, first_seen, last_seen, resolved_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		ON CONFLICT (id) DO UPDATE SET severity = EXCLUDED.severity, status = EXCLUDED.status, title = EXCLUDED.title,
+			detail = EXCLUDED.detail, evidence = EXCLUDED.evidence, last_seen = EXCLUDED.last_seen, resolved_at = EXCLUDED.resolved_at`,
+		in.ID, in.Kind, in.Severity, in.Status, in.TenantID, in.AppID, in.Model, in.Title, in.Detail, evidence,
+		in.FirstSeen, in.LastSeen, in.ResolvedAt)
+	return err
+}
+
+func (p *Postgres) ListInsights(ctx context.Context, status string) ([]Insight, error) {
+	rows, err := p.pool.Query(ctx, `
+		SELECT id, kind, severity, status, tenant_id, app_id, model, title, detail, evidence, first_seen, last_seen, resolved_at
+		FROM insights WHERE $1 = '' OR status = $1 ORDER BY last_seen DESC LIMIT 1000`, status)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Insight, error) {
+		var in Insight
+		var evidence []byte
+		err := r.Scan(&in.ID, &in.Kind, &in.Severity, &in.Status, &in.TenantID, &in.AppID, &in.Model, &in.Title,
+			&in.Detail, &evidence, &in.FirstSeen, &in.LastSeen, &in.ResolvedAt)
+		if err == nil {
+			err = json.Unmarshal(evidence, &in.Evidence)
+		}
+		return in, err
+	})
 }

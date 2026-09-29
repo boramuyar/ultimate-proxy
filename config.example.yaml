@@ -25,6 +25,34 @@ models:
     provider: openai
     upstream_model: gpt-5-mini
 
+# USD per million tokens, for cost accounting. "model" matches an alias above,
+# an upstream model name, or "<provider>/<upstream model>". cached_input and
+# cache_write default to input.
+prices:
+  - model: gpt-5
+    input: 1.25
+    cached_input: 0.125
+    output: 10
+  - model: gpt-5-mini
+    input: 0.25
+    cached_input: 0.025
+    output: 2
+
+# Problem detection. Every value below is the default.
+insights:
+  disabled: false
+  cache_ttl: 5m               # how long the provider keeps a prefix cached
+  min_cacheable_tokens: 1024  # the provider's minimum cacheable prompt
+  window: 15m                 # traffic each rule looks at
+  evaluate_interval: 1m
+  min_requests: 20            # least traffic in the window before a rule fires
+  unstable_prefix_rate: 0.3   # thresholds as a fraction of requests
+  unexpected_miss_rate: 0.3
+  error_rate: 0.1
+  truncation_rate: 0.2
+  webhook_url: ""             # JSON POST when an insight opens or resolves
+  slack_webhook_url: ""       # Slack incoming webhook for the same
+
 # Optional: tenants, applications and keys to create at startup.
 bootstrap:
   - tenant: acme

@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/boramuyar/ultimate-proxy/internal/identity"
+	"github.com/boramuyar/ultimate-proxy/internal/insights"
 	"github.com/boramuyar/ultimate-proxy/internal/metrics"
 	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
+	"github.com/boramuyar/ultimate-proxy/internal/pricing"
 	"github.com/boramuyar/ultimate-proxy/internal/provider"
 	"github.com/boramuyar/ultimate-proxy/internal/sse"
 	"github.com/boramuyar/ultimate-proxy/internal/store"
@@ -48,6 +50,19 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		openresponses.WriteError(w, openresponses.InvalidRequest("model_not_found", "The requested model '"+req.Model+"' does not exist.", "model"))
 		return
+	}
+
+	// Fingerprint the prompt prefix and note what the cache should hold for
+	// it. Caches are per upstream model, so that is the scope, per application.
+	var (
+		fp         *insights.Fingerprint
+		exp        insights.Expectation
+		cacheScope string
+	)
+	if s.insights != nil {
+		fp = insights.Compute(body)
+		cacheScope = principal.AppID + "\x00" + route.Provider.Name() + "/" + route.UpstreamModel
+		exp = s.insights.Tracker.Before(cacheScope, fp, start)
 	}
 
 	email, source := identity.ResolveUser(principal, r, &req)
@@ -133,6 +148,20 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(res.Response)
 	}
 
+	cost, priced := s.prices.Cost(ev.Model, ev.Provider, ev.UpstreamModel, pricing.Usage{
+		InputTokens: ev.InputTokens, CachedInputTokens: ev.CachedInputTokens,
+		CacheWriteTokens: ev.CacheWriteTokens, OutputTokens: ev.OutputTokens,
+	})
+	ev.CostUSD = cost
+	var missedCost float64
+	if fp != nil && ev.UsageReported && ev.Status != "failed" {
+		ev.CacheStatus, ev.ExpectedCachedTokens = s.insights.Tracker.Classify(fp, exp, ev.InputTokens, ev.CachedInputTokens)
+		s.insights.Tracker.After(cacheScope, fp, time.Now())
+		if ev.CacheStatus == insights.CacheUnexpectedMiss && priced {
+			missedCost = float64(ev.ExpectedCachedTokens) * s.prices.SavingsPerCachedToken(ev.Model, ev.Provider, ev.UpstreamModel)
+		}
+	}
+
 	elapsed := time.Since(start)
 	ev.LatencyMS = int(elapsed.Milliseconds())
 	if ts != nil && !ts.first.IsZero() {
@@ -142,6 +171,14 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	s.meter.Record(ev)
 	s.observe(&ev, principal, elapsed)
+	if s.insights != nil {
+		s.insights.Record(insights.Observation{
+			TS: start, TenantID: principal.TenantID, TenantName: principal.TenantName,
+			AppID: principal.AppID, AppName: principal.AppName, Model: ev.Model,
+			Status: ev.Status, ErrorCode: ev.ErrorCode, CacheStatus: ev.CacheStatus,
+			ExpectedCachedTokens: ev.ExpectedCachedTokens, MissedCostUSD: missedCost,
+		})
+	}
 }
 
 func (s *Server) observe(ev *store.UsageEvent, p *store.Principal, elapsed time.Duration) {
@@ -160,6 +197,15 @@ func (s *Server) observe(ev *store.UsageEvent, p *store.Principal, elapsed time.
 	addTokens("cache_write", ev.CacheWriteTokens)
 	addTokens("output", ev.OutputTokens)
 	addTokens("reasoning", ev.ReasoningTokens)
+	if ev.CacheStatus != "" {
+		metrics.CacheRequests.WithLabelValues(p.TenantName, p.AppName, ev.Model, ev.CacheStatus).Inc()
+	}
+	if ev.CacheStatus == insights.CacheUnexpectedMiss && ev.ExpectedCachedTokens > 0 {
+		metrics.CacheMissedTokens.WithLabelValues(p.TenantName, p.AppName, ev.Model).Add(float64(ev.ExpectedCachedTokens))
+	}
+	if ev.CostUSD > 0 {
+		metrics.CostUSD.WithLabelValues(p.TenantName, p.AppName, ev.Model).Add(ev.CostUSD)
+	}
 }
 
 // timingSink records when the first output delta reaches the client.
