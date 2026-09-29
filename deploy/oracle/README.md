@@ -29,11 +29,10 @@ ssh ubuntu@<public ip>
 sudo tail -20 /var/log/ultimate-proxy-setup.log   # shows the URL, admin token and demo key
 ```
 
-Credentials live in `/opt/ultimate-proxy/.env`. To use real models, add `ANTHROPIC_API_KEY` or
-`OPENAI_API_KEY` there and rerun `sudo bash /opt/ultimate-proxy/deploy/oracle/setup.sh`. Rerunning also
+Credentials live in `/opt/ultimate-proxy/.env`. To use real models, add `OPENAI_API_KEY` there and rerun `sudo bash /opt/ultimate-proxy/deploy/oracle/setup.sh`. Rerunning also
 pulls the latest `main`.
 
-Models: `fake-claude` and `fake-gpt` (free, fake answers), `smart` (Anthropic) and `fast` (OpenAI).
+Models: `fake-gpt` (free, fake answers), and `smart` and `fast` (OpenAI).
 
 The proxy is served over plain HTTP on port 8080. Put it behind HTTPS before sending real keys or
 prompts over the internet.

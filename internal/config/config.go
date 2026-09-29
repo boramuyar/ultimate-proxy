@@ -34,13 +34,10 @@ type Config struct {
 
 type Provider struct {
 	Name    string            `yaml:"name"`
-	Type    string            `yaml:"type"` // openai or anthropic
+	Type    string            `yaml:"type"` // openai
 	BaseURL string            `yaml:"base_url"`
 	APIKey  string            `yaml:"api_key"`
 	Headers map[string]string `yaml:"headers"`
-	// DefaultMaxTokens is used when a request sets no max_output_tokens and
-	// the upstream requires a limit (Anthropic).
-	DefaultMaxTokens int `yaml:"default_max_tokens"`
 }
 
 // Model maps a client-facing model name to a provider and upstream model.
@@ -114,9 +111,9 @@ func (c *Config) validate() error {
 		}
 		names[p.Name] = true
 		switch p.Type {
-		case "openai", "anthropic":
+		case "openai":
 		default:
-			return fmt.Errorf("provider %q: unknown type %q (want openai or anthropic)", p.Name, p.Type)
+			return fmt.Errorf("provider %q: unknown type %q (want openai)", p.Name, p.Type)
 		}
 	}
 	for _, m := range c.Models {

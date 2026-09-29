@@ -2,6 +2,10 @@
 
 Status: phase 1 (core proxy) built; later phases proposed. Spec target: Open Responses 2026-04-24.
 
+Scope note (2026-09-29): upstreams are limited to providers that speak Open Responses (OpenAI and
+compatible servers) for now. The Anthropic adapter described below was built in phase 1 and then
+removed; git history keeps it if Anthropic support comes back.
+
 ## 1. What it is
 
 A self-hosted gateway that speaks the [Open Responses](https://www.openresponses.org/) API to clients and

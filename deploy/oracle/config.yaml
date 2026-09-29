@@ -4,27 +4,19 @@ database_url: "${DATABASE_URL}"
 admin_token: "${PROXY_ADMIN_TOKEN}"
 
 providers:
-  # Free: a deterministic fake of both APIs, running next to the proxy.
-  - name: fake-anthropic
-    type: anthropic
-    base_url: http://fake-upstream:9090
-    api_key: fake-key
+  # Free: a deterministic fake of the Responses API, running next to the proxy.
   - name: fake-openai
     type: openai
     base_url: http://fake-upstream:9090/v1
     api_key: fake-key
-  # Real providers. Calls to them fail until their keys are set in .env.
-  - name: anthropic
-    type: anthropic
-    api_key: "${ANTHROPIC_API_KEY}"
+  # Real provider. Calls to it fail until its key is set in .env.
   - name: openai
     type: openai
     api_key: "${OPENAI_API_KEY}"
 
 models:
-  - {name: fake-claude, provider: fake-anthropic, upstream_model: claude-fake}
   - {name: fake-gpt, provider: fake-openai, upstream_model: gpt-fake}
-  - {name: smart, provider: anthropic, upstream_model: claude-sonnet-4-5}
+  - {name: smart, provider: openai, upstream_model: gpt-5}
   - {name: fast, provider: openai, upstream_model: gpt-5-mini}
 
 bootstrap:

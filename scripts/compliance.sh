@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs the Open Responses compliance suite against the proxy, once per adapter,
-# with the fake upstream standing in for the providers.
+# Runs the Open Responses compliance suite against the proxy, with the fake
+# upstream standing in for the provider.
 #
 #   scripts/compliance.sh <path to an openresponses/openresponses checkout>
 #
@@ -27,7 +27,7 @@ for _ in $(seq 50); do
 done
 
 (cd "$SPEC_DIR" && bun install --frozen-lockfile >/dev/null)
-for model in fake-claude fake-gpt; do
+for model in fake-gpt; do
   echo "== compliance: $model"
   (cd "$SPEC_DIR" && bun run bin/compliance-test.ts \
     --base-url http://localhost:8080/v1 --api-key up_ci_test_key --model "$model" --filter "$TESTS")

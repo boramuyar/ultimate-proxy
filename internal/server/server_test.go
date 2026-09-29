@@ -43,11 +43,9 @@ func newHarness(t testing.TB) *harness {
 	cfg, err := config.Parse([]byte(`
 admin_token: admin
 providers:
-  - {name: anthropic, type: anthropic, base_url: "` + upSrv.URL + `", api_key: fake-key}
   - {name: openai, type: openai, base_url: "` + upSrv.URL + `/v1", api_key: fake-key}
-  - {name: badkey, type: anthropic, base_url: "` + upSrv.URL + `", api_key: wrong}
+  - {name: badkey, type: openai, base_url: "` + upSrv.URL + `/v1", api_key: wrong}
 models:
-  - {name: claude, provider: anthropic, upstream_model: claude-fake}
   - {name: gpt, provider: openai, upstream_model: gpt-fake}
 `))
 	if err != nil {
@@ -157,7 +155,7 @@ func (h *harness) usage(q store.UsageQuery, wantRequests int64) []store.UsageRow
 
 func TestNonStreamingAttributesUsage(t *testing.T) {
 	h := newHarness(t)
-	resp := h.post(trustedKey, `{"model":"claude","input":"hi there"}`, "X-Proxy-User-Email", "Alice@Example.com")
+	resp := h.post(trustedKey, `{"model":"gpt","input":"hi there"}`, "X-Proxy-User-Email", "Alice@Example.com")
 	if resp.StatusCode != 200 {
 		t.Fatalf("status %d: %v", resp.StatusCode, decode(t, resp))
 	}
@@ -171,7 +169,7 @@ func TestNonStreamingAttributesUsage(t *testing.T) {
 	}
 
 	rows := h.usage(store.UsageQuery{GroupBy: []string{"email", "model"}}, 1)
-	if len(rows) != 1 || rows[0].Group["email"] != "alice@example.com" || rows[0].Group["model"] != "claude" {
+	if len(rows) != 1 || rows[0].Group["email"] != "alice@example.com" || rows[0].Group["model"] != "gpt" {
 		t.Fatalf("unexpected usage rows %+v", rows)
 	}
 	if rows[0].InputTokens != int64(usage["input_tokens"].(float64)) {
@@ -181,7 +179,7 @@ func TestNonStreamingAttributesUsage(t *testing.T) {
 
 func TestUntrustedAppCannotAssertUser(t *testing.T) {
 	h := newHarness(t)
-	resp := h.post(untrustedKey, `{"model":"claude","input":"hi","metadata":{"user_email":"mallory@example.com"}}`, "X-Proxy-User-Email", "ceo@example.com")
+	resp := h.post(untrustedKey, `{"model":"gpt","input":"hi","metadata":{"user_email":"mallory@example.com"}}`, "X-Proxy-User-Email", "ceo@example.com")
 	decode(t, resp)
 	rows := h.usage(store.UsageQuery{GroupBy: []string{"tenant", "email"}}, 1)
 	if len(rows) != 1 || rows[0].Group["email"] != "" {
@@ -191,8 +189,8 @@ func TestUntrustedAppCannotAssertUser(t *testing.T) {
 
 func TestUserFromMetadataAndSafetyIdentifier(t *testing.T) {
 	h := newHarness(t)
-	decode(t, h.post(trustedKey, `{"model":"claude","input":"hi","metadata":{"user_email":"meta@example.com"}}`))
-	decode(t, h.post(trustedKey, `{"model":"claude","input":"hi","safety_identifier":"safe@example.com"}`))
+	decode(t, h.post(trustedKey, `{"model":"gpt","input":"hi","metadata":{"user_email":"meta@example.com"}}`))
+	decode(t, h.post(trustedKey, `{"model":"gpt","input":"hi","safety_identifier":"safe@example.com"}`))
 	rows := h.usage(store.UsageQuery{GroupBy: []string{"email"}}, 2)
 	got := map[string]bool{}
 	for _, r := range rows {
@@ -205,7 +203,7 @@ func TestUserFromMetadataAndSafetyIdentifier(t *testing.T) {
 
 func TestStreamingToolCall(t *testing.T) {
 	h := newHarness(t)
-	for _, model := range []string{"claude", "gpt"} {
+	for _, model := range []string{"gpt"} {
 		t.Run(model, func(t *testing.T) {
 			resp := h.post(trustedKey, `{"model":"`+model+`","stream":true,"input":"weather?","tools":[{"type":"function","name":"get_weather","parameters":{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}}]}`)
 			s := readStream(t, resp)
@@ -229,78 +227,9 @@ func TestStreamingToolCall(t *testing.T) {
 	}
 }
 
-func TestToolRoundTripTranslatesToAnthropic(t *testing.T) {
-	h := newHarness(t)
-	resp := h.post(trustedKey, `{"model":"claude","instructions":"Be brief.","input":[
-		{"type":"message","role":"developer","content":"Use tools."},
-		{"type":"message","role":"assistant","content":"Earlier answer."},
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"weather?"},{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]},
-		{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"location\":\"SF\"}"},
-		{"type":"function_call_output","call_id":"call_1","output":"sunny"}
-	],"tools":[{"type":"function","name":"get_weather","parameters":{"type":"object"}}],"tool_choice":"required","parallel_tool_calls":false}`)
-	body := decode(t, resp)
-	if resp.StatusCode != 200 {
-		t.Fatalf("status %d: %v", resp.StatusCode, body)
-	}
-	var sent struct {
-		System []struct {
-			Text string `json:"text"`
-		} `json:"system"`
-		Messages []struct {
-			Role    string `json:"role"`
-			Content []struct {
-				Type      string `json:"type"`
-				ToolUseID string `json:"tool_use_id"`
-				Source    struct {
-					Type, MediaType string
-				} `json:"source"`
-			} `json:"content"`
-		} `json:"messages"`
-		ToolChoice struct {
-			Type                   string `json:"type"`
-			DisableParallelToolUse bool   `json:"disable_parallel_tool_use"`
-		} `json:"tool_choice"`
-	}
-	if err := json.Unmarshal(h.upstream.LastRequest(), &sent); err != nil {
-		t.Fatal(err)
-	}
-	if len(sent.System) != 2 || sent.System[0].Text != "Be brief." || sent.System[1].Text != "Use tools." {
-		t.Errorf("system prompt not translated: %+v", sent.System)
-	}
-	roles := []string{}
-	for _, m := range sent.Messages {
-		roles = append(roles, m.Role)
-	}
-	if strings.Join(roles, ",") != "user,assistant,user,assistant,user" {
-		t.Errorf("unexpected roles %v", roles)
-	}
-	if last := sent.Messages[len(sent.Messages)-1].Content[0]; last.Type != "tool_result" || last.ToolUseID != "call_1" {
-		t.Errorf("tool result not translated: %+v", last)
-	}
-	if sent.ToolChoice.Type != "any" || !sent.ToolChoice.DisableParallelToolUse {
-		t.Errorf("tool_choice not translated: %+v", sent.ToolChoice)
-	}
-}
-
-func TestReasoningRoundTrip(t *testing.T) {
-	h := newHarness(t)
-	body := decode(t, h.post(trustedKey, `{"model":"claude","input":"think","reasoning":{"effort":"low"},"max_output_tokens":100}`))
-	out := body["output"].([]any)
-	rs := out[0].(map[string]any)
-	if rs["type"] != "reasoning" || rs["encrypted_content"] != "sig_fake" {
-		t.Fatalf("unexpected reasoning item %v", rs)
-	}
-	// Replaying the reasoning item must send the thinking block and signature back.
-	item, _ := json.Marshal(rs)
-	decode(t, h.post(trustedKey, `{"model":"claude","reasoning":{"effort":"low"},"input":[{"type":"message","role":"user","content":"think"},`+string(item)+`,{"type":"message","role":"user","content":"again"}]}`))
-	if !strings.Contains(string(h.upstream.LastRequest()), `"signature":"sig_fake"`) {
-		t.Fatalf("signature not replayed: %s", h.upstream.LastRequest())
-	}
-}
-
 func TestMidstreamFailure(t *testing.T) {
 	h := newHarness(t)
-	s := readStream(t, h.post(trustedKey, `{"model":"claude","stream":true,"input":"please `+fakeupstream.TriggerFailMidstream+`"}`))
+	s := readStream(t, h.post(trustedKey, `{"model":"gpt","stream":true,"input":"please `+fakeupstream.TriggerFailMidstream+`"}`))
 	n := len(s.names)
 	if n < 2 || s.names[n-2] != "error" || s.names[n-1] != "response.failed" || !s.done {
 		t.Fatalf("expected error then response.failed, got %v", s.names)
@@ -313,7 +242,7 @@ func TestMidstreamFailure(t *testing.T) {
 
 func TestIncompleteOnMaxTokens(t *testing.T) {
 	h := newHarness(t)
-	body := decode(t, h.post(trustedKey, `{"model":"claude","input":"`+fakeupstream.TriggerMaxTokens+`"}`))
+	body := decode(t, h.post(trustedKey, `{"model":"gpt","input":"`+fakeupstream.TriggerMaxTokens+`"}`))
 	if body["status"] != "incomplete" || body["incomplete_details"].(map[string]any)["reason"] != "max_output_tokens" {
 		t.Fatalf("unexpected %v", body)
 	}
@@ -341,12 +270,11 @@ func TestErrors(t *testing.T) {
 		status          int
 		code            string
 	}{
-		{"bad key", "up_nope", `{"model":"claude","input":"hi"}`, 401, "invalid_api_key"},
+		{"bad key", "up_nope", `{"model":"gpt","input":"hi"}`, 401, "invalid_api_key"},
 		{"unknown model", trustedKey, `{"model":"nope","input":"hi"}`, 400, "model_not_found"},
-		{"upstream 404", trustedKey, `{"model":"anthropic/missing-model","input":"hi"}`, 400, "model_not_found"},
-		{"upstream auth", trustedKey, `{"model":"badkey/claude-fake","input":"hi"}`, 502, "upstream_auth_failed"},
+		{"upstream 404", trustedKey, `{"model":"openai/missing-model","input":"hi"}`, 400, "model_not_found"},
+		{"upstream auth", trustedKey, `{"model":"badkey/gpt-fake","input":"hi"}`, 502, "upstream_auth_failed"},
 		{"bad json", trustedKey, `{`, 400, "invalid_json"},
-		{"hosted tool", trustedKey, `{"model":"claude","input":"hi","tools":[{"type":"web_search"}]}`, 400, "unsupported_tool"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -382,7 +310,7 @@ func TestAdminKeysAndUsage(t *testing.T) {
 	if status != 201 || !strings.HasPrefix(key["key"].(string), "up_") {
 		t.Fatalf("key not created: %d %v", status, key)
 	}
-	decode(t, h.post(key["key"].(string), `{"model":"claude","input":"hi"}`, "X-Proxy-User-Email", "peter@initech.com"))
+	decode(t, h.post(key["key"].(string), `{"model":"gpt","input":"hi"}`, "X-Proxy-User-Email", "peter@initech.com"))
 	h.usage(store.UsageQuery{}, 1)
 
 	_, usage := admin("GET", "/admin/usage?group_by=tenant,application,email", "")
@@ -394,7 +322,7 @@ func TestAdminKeysAndUsage(t *testing.T) {
 	if status, _ := admin("DELETE", "/admin/keys/"+key["id"].(string), ""); status != 204 {
 		t.Fatalf("revoke status %d", status)
 	}
-	if resp := h.post(key["key"].(string), `{"model":"claude","input":"hi"}`); resp.StatusCode != 401 {
+	if resp := h.post(key["key"].(string), `{"model":"gpt","input":"hi"}`); resp.StatusCode != 401 {
 		t.Fatalf("revoked key still works: %d", resp.StatusCode)
 	}
 

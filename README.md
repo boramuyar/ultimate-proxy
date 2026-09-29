@@ -8,11 +8,8 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
 ## What works today (phase 1)
 
 - `POST /v1/responses`: JSON and SSE streaming, passing the Open Responses HTTP compliance tests.
-- Providers:
-  - `openai`: any upstream that already speaks Open Responses (OpenAI's Responses API and compatible
-    servers). Events are relayed as-is.
-  - `anthropic`: translated to and from the Messages API, covering text, images, PDFs, function tools,
-    `tool_choice`, reasoning (extended thinking, replayable across turns) and prompt-cache usage.
+- Upstreams: any provider that speaks Open Responses (OpenAI's Responses API and compatible servers).
+  Requests and events are relayed as-is; the proxy only reads the final usage.
 - API keys per application. Each key belongs to one application and one tenant.
 - End-user attribution from the `X-Proxy-User-Email` header, `metadata.user_email` or `safety_identifier`,
   accepted only from applications allowed to name their users.
@@ -22,9 +19,8 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
   or provider, optionally bucketed by hour or day.
 - Prometheus metrics at `/metrics`.
 
-Not built yet: WebSocket transport, `/v1/responses/compact`, `previous_response_id` for non-OpenAI
-upstreams, background responses, cache-miss insights, budgets and rate limits. They are later phases in
-the design doc.
+Not built yet: WebSocket transport, `/v1/responses/compact`, background responses, cache-miss
+insights, budgets and rate limits. They are later phases in the design doc.
 
 ## Run it
 
@@ -80,8 +76,8 @@ Revoke a key with `DELETE /admin/keys/<key id>`.
 go test ./...                                         # unit and integration tests (fake upstream)
 TEST_DATABASE_URL=postgres://… go test ./internal/store  # also run the store tests against Postgres
 go test -run x -bench Overhead ./internal/server      # proxy overhead vs. calling the upstream directly
-scripts/compliance.sh <openresponses checkout>        # official compliance suite, both adapters
+scripts/compliance.sh <openresponses checkout>        # official compliance suite
 ```
 
-`cmd/fake-upstream` is a deterministic fake of the Anthropic Messages and OpenAI Responses APIs, so tests
+`cmd/fake-upstream` is a deterministic fake of the OpenAI Responses API, so tests
 and CI need no provider credentials.

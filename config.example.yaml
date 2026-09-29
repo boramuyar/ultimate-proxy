@@ -8,22 +8,19 @@ database_url: "${DATABASE_URL}"
 admin_token: "${PROXY_ADMIN_TOKEN}"
 
 providers:
-  - name: openai            # speaks Open Responses natively; relayed as-is
+  # Any upstream that speaks Open Responses (OpenAI's Responses API or a
+  # compatible server). Requests and events are relayed as-is.
+  - name: openai
     type: openai
     base_url: https://api.openai.com/v1
     api_key: "${OPENAI_API_KEY}"
-  - name: anthropic         # translated to and from the Messages API
-    type: anthropic
-    base_url: https://api.anthropic.com
-    api_key: "${ANTHROPIC_API_KEY}"
-    default_max_tokens: 8192
 
 # Client-facing model names. Clients can also send "<provider>/<model>",
-# for example "anthropic/claude-sonnet-4-5".
+# for example "openai/gpt-5".
 models:
   - name: smart
-    provider: anthropic
-    upstream_model: claude-sonnet-4-5
+    provider: openai
+    upstream_model: gpt-5
   - name: fast
     provider: openai
     upstream_model: gpt-5-mini

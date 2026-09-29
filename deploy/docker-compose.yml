@@ -1,4 +1,4 @@
-# Local stack: proxy + Postgres. Set OPENAI_API_KEY / ANTHROPIC_API_KEY first.
+# Local stack: proxy + Postgres. Set OPENAI_API_KEY first.
 services:
   postgres:
     image: postgres:16
@@ -18,7 +18,6 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/proxy
       PROXY_ADMIN_TOKEN: ${PROXY_ADMIN_TOKEN:-change-me}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ACME_SUPPORT_BOT_KEY: ${ACME_SUPPORT_BOT_KEY:-up_dev_key}
     depends_on:
       postgres: {condition: service_healthy}

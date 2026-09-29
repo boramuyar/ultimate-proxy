@@ -42,8 +42,7 @@ if [ ! -f "$ENV" ]; then
 PROXY_ADMIN_TOKEN=$(rand)
 DEMO_APP_KEY=up_$(rand)
 POSTGRES_PASSWORD=$(rand)
-# Add real provider keys here, then run: sudo bash $DIR/deploy/oracle/setup.sh
-ANTHROPIC_API_KEY=
+# Add a real provider key here, then run: sudo bash $DIR/deploy/oracle/setup.sh
 OPENAI_API_KEY=
 VARS
 fi
@@ -68,6 +67,6 @@ Demo key:    $DEMO_APP_KEY
 
 Try it:
   curl http://$IP:8080/v1/responses -H "Authorization: Bearer $DEMO_APP_KEY" \\
-    -H "X-Proxy-User-Email: you@example.com" -d '{"model":"fake-claude","input":"hi"}'
+    -H "X-Proxy-User-Email: you@example.com" -d '{"model":"fake-gpt","input":"hi"}'
   curl "http://$IP:8080/admin/usage?group_by=email" -H "Authorization: Bearer $PROXY_ADMIN_TOKEN"
 DONE

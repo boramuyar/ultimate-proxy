@@ -12,13 +12,12 @@ import (
 func BenchmarkOverhead(b *testing.B) {
 	h := newHarness(b)
 
-	anth := `{"model":"claude-fake","max_tokens":100,"stream":true,"messages":[{"role":"user","content":[{"type":"text","text":"hi there"}]}]}`
-	upURL := h.upstreamURL + "/v1/messages"
+	direct := `{"model":"gpt-fake","input":"hi there","stream":true}`
+	upURL := h.upstreamURL + "/v1/responses"
 	b.Run("direct", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			req, _ := http.NewRequest("POST", upURL, strings.NewReader(anth))
-			req.Header.Set("x-api-key", "fake-key")
-			req.Header.Set("anthropic-version", "2023-06-01")
+			req, _ := http.NewRequest("POST", upURL, strings.NewReader(direct))
+			req.Header.Set("Authorization", "Bearer fake-key")
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				b.Fatal(err)
@@ -28,12 +27,12 @@ func BenchmarkOverhead(b *testing.B) {
 	})
 	b.Run("proxy", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			drain(h.post(trustedKey, `{"model":"claude","input":"hi there"}`))
+			drain(h.post(trustedKey, `{"model":"gpt","input":"hi there"}`))
 		}
 	})
 	b.Run("proxy-stream", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			drain(h.post(trustedKey, `{"model":"claude","input":"hi there","stream":true}`))
+			drain(h.post(trustedKey, `{"model":"gpt","input":"hi there","stream":true}`))
 		}
 	})
 }
