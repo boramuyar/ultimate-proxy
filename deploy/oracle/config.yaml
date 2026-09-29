@@ -1,0 +1,34 @@
+# Server config used by deploy/oracle/setup.sh. ${VAR}s come from /opt/ultimate-proxy/.env.
+listen: ":8080"
+database_url: "${DATABASE_URL}"
+admin_token: "${PROXY_ADMIN_TOKEN}"
+
+providers:
+  # Free: a deterministic fake of both APIs, running next to the proxy.
+  - name: fake-anthropic
+    type: anthropic
+    base_url: http://fake-upstream:9090
+    api_key: fake-key
+  - name: fake-openai
+    type: openai
+    base_url: http://fake-upstream:9090/v1
+    api_key: fake-key
+  # Real providers. Calls to them fail until their keys are set in .env.
+  - name: anthropic
+    type: anthropic
+    api_key: "${ANTHROPIC_API_KEY}"
+  - name: openai
+    type: openai
+    api_key: "${OPENAI_API_KEY}"
+
+models:
+  - {name: fake-claude, provider: fake-anthropic, upstream_model: claude-fake}
+  - {name: fake-gpt, provider: fake-openai, upstream_model: gpt-fake}
+  - {name: smart, provider: anthropic, upstream_model: claude-sonnet-4-5}
+  - {name: fast, provider: openai, upstream_model: gpt-5-mini}
+
+bootstrap:
+  - tenant: demo
+    applications:
+      - name: playground
+        keys: ["${DEMO_APP_KEY}"]
