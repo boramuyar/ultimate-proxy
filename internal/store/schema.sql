@@ -74,3 +74,16 @@ CREATE TABLE IF NOT EXISTS insights (
 );
 
 CREATE INDEX IF NOT EXISTS insights_status_last_seen ON insights (status, last_seen DESC);
+
+CREATE TABLE IF NOT EXISTS model_prices (
+    id             text PRIMARY KEY,
+    model          text NOT NULL,
+    input          double precision NOT NULL,
+    cached_input   double precision NOT NULL,
+    cache_write    double precision NOT NULL,
+    output         double precision NOT NULL,
+    effective_from timestamptz NOT NULL,
+    created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS model_prices_model_effective ON model_prices (model, effective_from);

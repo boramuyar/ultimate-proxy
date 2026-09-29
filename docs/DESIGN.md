@@ -141,7 +141,9 @@ replica are good enough, and a shared store can be added when cache-affinity rou
 it. Built rules: unstable prefix (with the dominant cause), unexpected miss (with missed tokens and
 dollars), error rate and truncation, over a sliding window with open/resolve hysteresis (open at the
 threshold, resolve below half of it, or when traffic stops). Latency and cost-spike baselines, the
-key/region affinity signal, and email delivery are not built yet.
+key/region affinity signal, and email delivery are not built yet. Prices are an append-only
+`model_prices` table managed through `/admin/prices` rather than a bundled catalog or config file:
+each row has an `effective_from`, and each request is costed with the price in effect when it ran.
 
 ## 4. Additional features I'd propose
 

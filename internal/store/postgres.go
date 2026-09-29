@@ -256,3 +256,24 @@ func (p *Postgres) ListInsights(ctx context.Context, status string) ([]Insight, 
 		return in, err
 	})
 }
+
+func (p *Postgres) AddPrice(ctx context.Context, pr *Price) error {
+	return p.pool.QueryRow(ctx, `
+		INSERT INTO model_prices (id, model, input, cached_input, cache_write, output, effective_from)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING created_at`,
+		pr.ID, pr.Model, pr.Input, pr.CachedInput, pr.CacheWrite, pr.Output, pr.EffectiveFrom).Scan(&pr.CreatedAt)
+}
+
+func (p *Postgres) ListPrices(ctx context.Context) ([]Price, error) {
+	rows, err := p.pool.Query(ctx, `
+		SELECT id, model, input, cached_input, cache_write, output, effective_from, created_at
+		FROM model_prices ORDER BY effective_from, created_at`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Price, error) {
+		var pr Price
+		err := r.Scan(&pr.ID, &pr.Model, &pr.Input, &pr.CachedInput, &pr.CacheWrite, &pr.Output, &pr.EffectiveFrom, &pr.CreatedAt)
+		return pr, err
+	})
+}

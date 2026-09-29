@@ -58,7 +58,7 @@ var (
 
 	CostUSD = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ultimate_proxy_cost_usd_total",
-		Help: "Estimated spend in USD from configured prices.",
+		Help: "Estimated spend in USD from the prices table.",
 	}, []string{"tenant", "application", "model"})
 
 	InsightsOpen = prometheus.NewGaugeVec(prometheus.GaugeOpts{

@@ -29,20 +29,8 @@ type Config struct {
 
 	Providers []Provider `yaml:"providers"`
 	Models    []Model    `yaml:"models"`
-	Prices    []Price    `yaml:"prices"`
 	Insights  Insights   `yaml:"insights"`
 	Bootstrap []Tenant   `yaml:"bootstrap"`
-}
-
-// Price is USD per million tokens. Model matches a client-facing alias, an
-// upstream model name, or "<provider>/<upstream model>". CachedInput and
-// CacheWrite default to Input when unset.
-type Price struct {
-	Model       string   `yaml:"model"`
-	Input       float64  `yaml:"input"`
-	CachedInput *float64 `yaml:"cached_input"`
-	CacheWrite  *float64 `yaml:"cache_write"`
-	Output      float64  `yaml:"output"`
 }
 
 // Insights configures problem detection and alerting.
@@ -191,11 +179,6 @@ func (c *Config) validate() error {
 		}
 		if !names[m.Provider] {
 			return fmt.Errorf("model %q: unknown provider %q", m.Name, m.Provider)
-		}
-	}
-	for _, p := range c.Prices {
-		if p.Model == "" || p.Input < 0 || p.Output < 0 {
-			return fmt.Errorf("price entries need a model and non-negative prices")
 		}
 	}
 	return nil

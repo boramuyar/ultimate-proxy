@@ -130,6 +130,21 @@ type UsageRow struct {
 	CostUSD           float64           `json:"cost_usd"`
 }
 
+// Price is what a model costs, in USD per million tokens, from EffectiveFrom
+// until a later price for the same model takes over. Prices are never edited
+// in place, so past costs stay explainable. Model matches a client-facing
+// alias, an upstream model name, or "<provider>/<upstream model>".
+type Price struct {
+	ID            string    `json:"id"`
+	Model         string    `json:"model"`
+	Input         float64   `json:"input"`
+	CachedInput   float64   `json:"cached_input"`
+	CacheWrite    float64   `json:"cache_write"`
+	Output        float64   `json:"output"`
+	EffectiveFrom time.Time `json:"effective_from"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 // Insight is a problem the proxy noticed in live traffic, such as an
 // application whose prompt cache keeps missing.
 type Insight struct {
@@ -160,6 +175,9 @@ type Store interface {
 	LookupKey(ctx context.Context, hash string) (*Principal, error)
 	InsertUsage(ctx context.Context, events []UsageEvent) error
 	QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, error)
+	AddPrice(ctx context.Context, p *Price) error
+	// ListPrices returns every price, oldest effective first.
+	ListPrices(ctx context.Context) ([]Price, error)
 	// SaveInsight inserts or updates an insight by ID.
 	SaveInsight(ctx context.Context, in *Insight) error
 	// ListInsights returns insights with the given status ("" for all), newest first.

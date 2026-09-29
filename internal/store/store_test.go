@@ -20,7 +20,7 @@ func stores(t *testing.T) map[string]Store {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pg.pool.Exec(context.Background(), "TRUNCATE usage_events, insights, api_keys, applications, tenants"); err != nil {
+		if _, err := pg.pool.Exec(context.Background(), "TRUNCATE usage_events, insights, model_prices, api_keys, applications, tenants"); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(pg.Close)
@@ -119,6 +119,23 @@ func TestStores(t *testing.T) {
 			}
 			if len(open) != 0 || len(all) != 1 || all[0].ResolvedAt == nil || all[0].Evidence["rate"] != 0.5 {
 				t.Fatalf("insights: open %+v all %+v", open, all)
+			}
+
+			jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			for _, pr := range []*Price{
+				{ID: openresponses.NewID("price"), Model: "m1", Input: 2, CachedInput: 1, CacheWrite: 2, Output: 8, EffectiveFrom: jan.AddDate(0, 5, 0)},
+				{ID: openresponses.NewID("price"), Model: "m1", Input: 3, CachedInput: 1, CacheWrite: 3, Output: 9, EffectiveFrom: jan},
+			} {
+				if err := st.AddPrice(ctx, pr); err != nil {
+					t.Fatal(err)
+				}
+			}
+			prices, err := st.ListPrices(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(prices) != 2 || prices[0].Input != 3 || !prices[1].EffectiveFrom.Equal(jan.AddDate(0, 5, 0)) {
+				t.Fatalf("prices %+v", prices)
 			}
 		})
 	}

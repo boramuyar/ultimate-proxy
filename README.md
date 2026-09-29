@@ -20,7 +20,7 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
 - Prompt-cache diagnosis on every request: whether the cache hit, and if not, why (see below).
 - Insights: problems the proxy notices in live traffic, per application and model, listed at
   `GET /admin/insights` and posted to a webhook or Slack when they open and resolve.
-- Cost in USD from the prices in the config, on every usage event and in `/admin/usage`.
+- Cost in USD from a versioned prices table, on every usage event and in `/admin/usage`.
 - Prometheus metrics at `/metrics`.
 
 Not built yet: WebSocket transport, `/v1/responses/compact`, background responses, budgets and rate
@@ -72,7 +72,24 @@ curl -s "localhost:8080/admin/usage?group_by=tenant,application,email&granularit
 | `granularity` | `hour` or `day`. Default: one row per group. |
 | `tenant_id`, `application_id`, `email`, `model`, `provider`, `cache_status` | Filters. |
 
-Each row also carries `cost_usd` when the model has a price in the config.
+Each row also carries `cost_usd` when the model had a price at the time of the request.
+
+## Prices
+
+Prices are rows in the `model_prices` table, in USD per million tokens. They are never edited: when a
+provider changes its price, add a new row, and it takes over from `effective_from` (default now).
+Each request's cost is computed with the price in effect when it was made and stored on its usage
+event, so past costs don't change.
+
+```sh
+curl -s localhost:8080/admin/prices -H "$ADMIN" \
+  -d '{"model":"gpt-5","input":1.25,"cached_input":0.125,"output":10}'
+curl -s "localhost:8080/admin/prices?current=true" -H "$ADMIN"   # prices in effect now
+curl -s localhost:8080/admin/prices -H "$ADMIN"                  # full history
+```
+
+`model` matches a client-facing alias, an upstream model name, or `<provider>/<upstream model>`.
+`cached_input` and `cache_write` default to `input`. Each replica reloads the table every 30 seconds.
 
 Revoke a key with `DELETE /admin/keys/<key id>`.
 

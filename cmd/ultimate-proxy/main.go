@@ -59,6 +59,10 @@ func run(configPath string, log *slog.Logger) error {
 	if err := srv.Bootstrap(ctx); err != nil {
 		return err
 	}
+	if err := srv.Prices().Reload(ctx); err != nil {
+		return err
+	}
+	go srv.Prices().Run(ctx, 30*time.Second)
 	if eng := srv.Insights(); eng != nil {
 		if err := eng.Load(ctx); err != nil {
 			return err

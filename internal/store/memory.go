@@ -19,6 +19,7 @@ type Memory struct {
 	keys     map[string]*APIKey // by hash
 	events   []UsageEvent
 	insights map[string]Insight
+	prices   []Price
 }
 
 func NewMemory() *Memory {
@@ -246,5 +247,20 @@ func (m *Memory) ListInsights(_ context.Context, status string) ([]Insight, erro
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastSeen.After(out[j].LastSeen) })
+	return out, nil
+}
+
+func (m *Memory) AddPrice(_ context.Context, p *Price) error {
+	m.mu.Lock()
+	m.prices = append(m.prices, *p)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Memory) ListPrices(context.Context) ([]Price, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := append([]Price{}, m.prices...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].EffectiveFrom.Before(out[j].EffectiveFrom) })
 	return out, nil
 }

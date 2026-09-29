@@ -25,18 +25,8 @@ models:
     provider: openai
     upstream_model: gpt-5-mini
 
-# USD per million tokens, for cost accounting. "model" matches an alias above,
-# an upstream model name, or "<provider>/<upstream model>". cached_input and
-# cache_write default to input.
-prices:
-  - model: gpt-5
-    input: 1.25
-    cached_input: 0.125
-    output: 10
-  - model: gpt-5-mini
-    input: 0.25
-    cached_input: 0.025
-    output: 2
+# Model prices live in the database, not here: add them with
+# POST /admin/prices (see the README).
 
 # Problem detection. Every value below is the default.
 insights:

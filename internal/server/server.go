@@ -35,7 +35,7 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, store: st, auth: identity.NewAuthenticator(st), meter: m, router: router, prices: pricing.New(cfg.Prices), log: log}
+	s := &Server{cfg: cfg, store: st, auth: identity.NewAuthenticator(st), meter: m, router: router, prices: pricing.New(st, log), log: log}
 	if !cfg.Insights.Disabled {
 		var n insights.Notifier
 		if wh := insights.NewWebhooks(cfg.Insights.WebhookURL, cfg.Insights.SlackWebhookURL, log); wh != nil {
@@ -45,6 +45,10 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 	}
 	return s, nil
 }
+
+// Prices returns the price table. Callers reload it at startup and keep it
+// fresh with Run.
+func (s *Server) Prices() *pricing.Table { return s.prices }
 
 // Insights returns the insight engine, or nil when insights are disabled.
 func (s *Server) Insights() *insights.Engine { return s.insights }
@@ -66,6 +70,8 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("DELETE /admin/keys/{id}", s.revokeKey)
 	admin.HandleFunc("GET /admin/usage", s.usage)
 	admin.HandleFunc("GET /admin/insights", s.listInsights)
+	admin.HandleFunc("GET /admin/prices", s.listPrices)
+	admin.HandleFunc("POST /admin/prices", s.addPrice)
 	mux.Handle("/admin/", s.requireAdmin(admin))
 	return mux
 }

@@ -1,30 +1,71 @@
-// Package pricing turns token usage into cost.
+// Package pricing turns token usage into cost, from the prices table.
 package pricing
 
-import "github.com/boramuyar/ultimate-proxy/internal/config"
+import (
+	"context"
+	"log/slog"
+	"sort"
+	"sync/atomic"
+	"time"
+
+	"github.com/boramuyar/ultimate-proxy/internal/store"
+)
 
 type price struct {
+	from                                   time.Time
 	input, cachedInput, cacheWrite, output float64 // USD per token
 }
 
-// Table looks up prices by model alias, upstream model or provider/upstream.
+// Table is an in-memory copy of the prices table, so cost lookups never touch
+// the database. Reload refreshes it.
 type Table struct {
-	byModel map[string]price
+	store store.Store
+	log   *slog.Logger
+	snap  atomic.Pointer[map[string][]price] // by model, oldest effective first
 }
 
-func New(prices []config.Price) *Table {
-	t := &Table{byModel: map[string]price{}}
-	for _, p := range prices {
-		pr := price{input: p.Input / 1e6, cachedInput: p.Input / 1e6, cacheWrite: p.Input / 1e6, output: p.Output / 1e6}
-		if p.CachedInput != nil {
-			pr.cachedInput = *p.CachedInput / 1e6
-		}
-		if p.CacheWrite != nil {
-			pr.cacheWrite = *p.CacheWrite / 1e6
-		}
-		t.byModel[p.Model] = pr
-	}
+func New(st store.Store, log *slog.Logger) *Table {
+	t := &Table{store: st, log: log}
+	empty := map[string][]price{}
+	t.snap.Store(&empty)
 	return t
+}
+
+// Reload reads every price from the store.
+func (t *Table) Reload(ctx context.Context) error {
+	rows, err := t.store.ListPrices(ctx)
+	if err != nil {
+		return err
+	}
+	m := map[string][]price{}
+	for _, p := range rows {
+		m[p.Model] = append(m[p.Model], price{
+			from: p.EffectiveFrom, input: p.Input / 1e6, cachedInput: p.CachedInput / 1e6,
+			cacheWrite: p.CacheWrite / 1e6, output: p.Output / 1e6,
+		})
+	}
+	for _, list := range m {
+		sort.SliceStable(list, func(i, j int) bool { return list[i].from.Before(list[j].from) })
+	}
+	t.snap.Store(&m)
+	return nil
+}
+
+// Run reloads the table every interval, so prices added through another
+// replica take effect here too.
+func (t *Table) Run(ctx context.Context, interval time.Duration) {
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			if err := t.Reload(ctx); err != nil && ctx.Err() == nil {
+				t.log.Error("reloading prices failed", "err", err)
+			}
+		}
+	}
 }
 
 // Usage is the token counts a cost is computed from. InputTokens includes
@@ -33,15 +74,25 @@ type Usage struct {
 	InputTokens, CachedInputTokens, CacheWriteTokens, OutputTokens int
 }
 
-// Cost returns the USD cost of a request, and false when no price is known.
-func (t *Table) Cost(alias, provider, upstream string, u Usage) (float64, bool) {
-	p, ok := t.byModel[alias]
-	if !ok {
-		p, ok = t.byModel[provider+"/"+upstream]
+// lookup finds the price in effect at a time, trying the alias, then
+// provider/upstream, then the bare upstream model.
+func (t *Table) lookup(at time.Time, alias, provider, upstream string) (price, bool) {
+	m := *t.snap.Load()
+	for _, key := range []string{alias, provider + "/" + upstream, upstream} {
+		list := m[key]
+		for i := len(list) - 1; i >= 0; i-- {
+			if !list[i].from.After(at) {
+				return list[i], true
+			}
+		}
 	}
-	if !ok {
-		p, ok = t.byModel[upstream]
-	}
+	return price{}, false
+}
+
+// Cost returns the USD cost of a request made at a time, and false when no
+// price was in effect.
+func (t *Table) Cost(at time.Time, alias, provider, upstream string, u Usage) (float64, bool) {
+	p, ok := t.lookup(at, alias, provider, upstream)
 	if !ok {
 		return 0, false
 	}
@@ -53,11 +104,10 @@ func (t *Table) Cost(alias, provider, upstream string, u Usage) (float64, bool) 
 }
 
 // SavingsPerCachedToken is how much a cache hit saves per input token.
-func (t *Table) SavingsPerCachedToken(alias, provider, upstream string) float64 {
-	c1, ok := t.Cost(alias, provider, upstream, Usage{InputTokens: 1})
+func (t *Table) SavingsPerCachedToken(at time.Time, alias, provider, upstream string) float64 {
+	p, ok := t.lookup(at, alias, provider, upstream)
 	if !ok {
 		return 0
 	}
-	c2, _ := t.Cost(alias, provider, upstream, Usage{InputTokens: 1, CachedInputTokens: 1})
-	return c1 - c2
+	return p.input - p.cachedInput
 }

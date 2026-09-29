@@ -48,8 +48,6 @@ providers:
   - {name: badkey, type: openai, base_url: "` + upSrv.URL + `/v1", api_key: wrong}
 models:
   - {name: gpt, provider: openai, upstream_model: gpt-fake}
-prices:
-  - {model: gpt, input: 2, cached_input: 0.5, output: 8}
 insights:
   min_cacheable_tokens: 10
   min_requests: 5
@@ -69,6 +67,12 @@ insights:
 		t.Fatal(err)
 	}
 	if err := srv.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddPrice(context.Background(), &store.Price{Model: "gpt", Input: 2, CachedInput: 0.5, CacheWrite: 2, Output: 8}); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Prices().Reload(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	proxy := httptest.NewServer(srv.Handler())

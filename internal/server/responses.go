@@ -148,7 +148,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(res.Response)
 	}
 
-	cost, priced := s.prices.Cost(ev.Model, ev.Provider, ev.UpstreamModel, pricing.Usage{
+	cost, priced := s.prices.Cost(start, ev.Model, ev.Provider, ev.UpstreamModel, pricing.Usage{
 		InputTokens: ev.InputTokens, CachedInputTokens: ev.CachedInputTokens,
 		CacheWriteTokens: ev.CacheWriteTokens, OutputTokens: ev.OutputTokens,
 	})
@@ -158,7 +158,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		ev.CacheStatus, ev.ExpectedCachedTokens = s.insights.Tracker.Classify(fp, exp, ev.InputTokens, ev.CachedInputTokens)
 		s.insights.Tracker.After(cacheScope, fp, time.Now())
 		if ev.CacheStatus == insights.CacheUnexpectedMiss && priced {
-			missedCost = float64(ev.ExpectedCachedTokens) * s.prices.SavingsPerCachedToken(ev.Model, ev.Provider, ev.UpstreamModel)
+			missedCost = float64(ev.ExpectedCachedTokens) * s.prices.SavingsPerCachedToken(start, ev.Model, ev.Provider, ev.UpstreamModel)
 		}
 	}
 

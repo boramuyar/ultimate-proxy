@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -140,5 +141,43 @@ func TestTruncationRaisesInsight(t *testing.T) {
 	open := h.insights("open")
 	if len(open) != 1 || open[0].Kind != insights.KindTruncation {
 		t.Fatalf("open insights %+v", open)
+	}
+}
+
+func (h *harness) admin(method, path, body string) *http.Response {
+	h.t.Helper()
+	req, _ := http.NewRequest(method, h.proxy.URL+path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return resp
+}
+
+func TestPriceChangeKeepsPastCosts(t *testing.T) {
+	h := newHarness(t)
+	h.send("", "hello")
+	before := h.usage(store.UsageQuery{GroupBy: []string{"none"}}, 1)[0].CostUSD
+
+	// A tenfold price change applies from now on only.
+	resp := h.admin(http.MethodPost, "/admin/prices", `{"model":"gpt","input":20,"cached_input":5,"output":80}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("add price: %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	h.send("", "hello")
+	rows := h.usage(store.UsageQuery{GroupBy: []string{"none"}}, 2)
+	if after := rows[0].CostUSD - before; before <= 0 || math.Abs(after-10*before) > 1e-9 {
+		t.Fatalf("cost before %v, after %v", before, after)
+	}
+
+	all := decode(t, h.admin(http.MethodGet, "/admin/prices", ""))["data"].([]any)
+	current := decode(t, h.admin(http.MethodGet, "/admin/prices?current=true", ""))["data"].([]any)
+	if len(all) != 2 || len(current) != 1 || current[0].(map[string]any)["input"] != 20.0 {
+		t.Fatalf("all %v current %v", all, current)
+	}
+	if resp := h.admin(http.MethodPost, "/admin/prices", `{"model":"gpt","input":-1,"output":1}`); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("negative price accepted: %d", resp.StatusCode)
 	}
 }
