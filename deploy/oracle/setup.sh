@@ -19,12 +19,14 @@ if ! command -v docker >/dev/null; then
 fi
 command -v git >/dev/null || (apt-get update -y && apt-get install -y git)
 
-echo "== opening port 8080"
+echo "== opening ports 8080 (proxy) and 3000 (dashboard)"
 # Oracle's Ubuntu images reject inbound traffic in iptables except SSH.
-if ! iptables -C INPUT -p tcp --dport 8080 -j ACCEPT 2>/dev/null; then
-  iptables -I INPUT 1 -p tcp --dport 8080 -j ACCEPT
-  if command -v netfilter-persistent >/dev/null; then netfilter-persistent save; fi
-fi
+for port in 8080 3000; do
+  if ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+    iptables -I INPUT 1 -p tcp --dport "$port" -j ACCEPT
+  fi
+done
+if command -v netfilter-persistent >/dev/null; then netfilter-persistent save; fi
 
 echo "== fetching the code"
 if [ -d "$DIR/.git" ]; then
@@ -48,8 +50,8 @@ VARS
 fi
 
 echo "== starting the stack"
-cd "$DIR/deploy/oracle"
-docker compose --env-file "$ENV" up -d --build
+cd "$DIR"
+docker compose up -d --build
 
 for _ in $(seq 60); do
   curl -sf localhost:8080/healthz >/dev/null && break
@@ -61,6 +63,7 @@ IP=$(curl -s --max-time 5 https://ifconfig.me || echo "<public ip>")
 cat <<DONE
 
 Ultimate Proxy is running on http://$IP:8080
+Dashboard:   http://$IP:3000 (sign in with the admin token)
 Admin token: $PROXY_ADMIN_TOKEN
 Demo key:    $DEMO_APP_KEY
 (both are stored in $ENV)

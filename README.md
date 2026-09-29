@@ -28,14 +28,39 @@ limits. They are later phases in the design doc.
 
 ## Run it
 
+Everything runs with Docker Compose: the proxy, Postgres, the dashboard, and a free fake model
+(`fake-gpt`) to try things without a provider key.
+
 ```sh
-cp config.example.yaml config.yaml    # edit providers and models
-DATABASE_URL=postgres://… PROXY_ADMIN_TOKEN=secret go run ./cmd/ultimate-proxy -config config.yaml
+cp .env.example .env        # optional: change the admin token, add OPENAI_API_KEY
+docker compose up -d --build
+scripts/demo-traffic.sh     # optional: sample tenants, traffic and cache problems
 ```
 
-Or `docker compose -f deploy/docker-compose.yml up` for the proxy plus Postgres.
+| What | Where |
+| --- | --- |
+| Dashboard | http://localhost:3000, sign in with `PROXY_ADMIN_TOKEN` (default `dev-admin-token`) |
+| Proxy API | http://localhost:8080, demo key `up_demo_key` for the `demo/playground` application |
 
-Without `database_url`, the proxy keeps keys and usage in memory, which is handy for trying it out.
+The proxy config for the stack is `deploy/compose/config.yaml`: models `fake-gpt` (free), `smart` and
+`fast` (OpenAI, once `OPENAI_API_KEY` is set). Data lives in the `pgdata` volume; `docker compose down -v`
+wipes it. `POSTGRES_PASSWORD` only applies when that volume is first created.
+
+Without Docker: `go run ./cmd/ultimate-proxy -config config.yaml` (see `config.example.yaml`; without
+`database_url` everything is kept in memory), and `cd web && npm install && npm run dev` for the
+dashboard on http://localhost:5173, which forwards `/admin` to `localhost:8080`.
+
+## Dashboard
+
+The dashboard (`web/`, React) is a front end for the admin API:
+
+- **Overview**: requests, tokens, cost and cache hit rate over 24 hours, 7 days or 30 days, with the
+  top applications and users.
+- **Usage**: group by tenant, application, email, model, provider or cache status, filter, export CSV.
+- **Prompt cache**: each application's hit rate and why its requests miss.
+- **Insights**: open and resolved problems with their cause and fix.
+- **Prices**: prices in effect and their history; add a new price.
+- **Tenants & keys**: create tenants, applications and keys; revoke keys.
 
 ## Use it
 

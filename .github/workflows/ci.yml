@@ -57,3 +57,22 @@ jobs:
         run: scripts/compliance.sh .spec
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/proxy
+
+  compose:
+    # Builds every image and checks the stack comes up and serves the dashboard.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the stack
+        run: docker compose up -d --build --wait --wait-timeout 180
+      - name: Send demo traffic
+        run: scripts/demo-traffic.sh
+      - name: Check the proxy and the dashboard
+        run: |
+          curl -sf localhost:3000/ | grep -q '<div id="root">'
+          curl -sf localhost:3000/admin/usage?group_by=application -H "Authorization: Bearer dev-admin-token" | grep -q support-bot
+          curl -sf localhost:8080/v1/responses -H "Authorization: Bearer up_demo_key" \
+            -d '{"model":"fake-gpt","input":"hi"}' | grep -q '"status":"completed"'
+      - name: Logs
+        if: failure()
+        run: docker compose logs

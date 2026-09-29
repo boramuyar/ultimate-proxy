@@ -15,10 +15,10 @@ models.
    - **Show advanced options → Management → Paste cloud-init script**: paste the contents of `setup.sh`
 3. Create. If Oracle reports "out of capacity" for A1, retry later or pick another availability domain.
 
-## 2. Open port 8080
+## 2. Open ports 8080 and 3000
 
 **Networking → Virtual cloud networks → your VCN → Security Lists → Default → Add ingress rule**:
-source `0.0.0.0/0`, TCP, destination port `8080`. (`setup.sh` opens the VM's own firewall.)
+source `0.0.0.0/0`, TCP, destination ports `8080,3000` (the proxy and the dashboard). (`setup.sh` opens the VM's own firewall.)
 
 ## 3. Get your credentials
 

@@ -207,5 +207,6 @@ internal/limits/         rate limits, budgets
 internal/router/         aliases, fallbacks, affinity
 internal/store/          postgres, redis
 migrations/
-deploy/docker-compose.yml
+docker-compose.yml  (proxy, Postgres, fake upstream, dashboard)
+web/               (dashboard)
 ```

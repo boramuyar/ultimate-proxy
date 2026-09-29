@@ -114,6 +114,19 @@ func (p *Postgres) RevokeKey(ctx context.Context, keyID string) error {
 	return nil
 }
 
+func (p *Postgres) ListKeys(ctx context.Context, appID string) ([]APIKey, error) {
+	rows, err := p.pool.Query(ctx, `
+		SELECT id, app_id, prefix, created_at, revoked_at FROM api_keys WHERE app_id = $1 ORDER BY created_at`, appID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (APIKey, error) {
+		var k APIKey
+		err := r.Scan(&k.ID, &k.AppID, &k.Prefix, &k.CreatedAt, &k.RevokedAt)
+		return k, err
+	})
+}
+
 func (p *Postgres) LookupKey(ctx context.Context, hash string) (*Principal, error) {
 	var pr Principal
 	err := p.pool.QueryRow(ctx, `

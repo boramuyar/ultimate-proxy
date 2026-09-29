@@ -1,0 +1,5 @@
+.git
+.env
+.spec
+web/node_modules
+web/dist

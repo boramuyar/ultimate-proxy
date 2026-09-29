@@ -116,6 +116,18 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request) {
 	}{k, key})
 }
 
+func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) {
+	keys, err := s.store.ListKeys(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.adminError(w, err)
+		return
+	}
+	if keys == nil {
+		keys = []store.APIKey{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": keys})
+}
+
 func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.RevokeKey(r.Context(), r.PathValue("id")); err != nil {
 		s.adminError(w, err)

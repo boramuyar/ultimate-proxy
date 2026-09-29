@@ -114,6 +114,19 @@ func (m *Memory) RevokeKey(_ context.Context, keyID string) error {
 	return ErrNotFound
 }
 
+func (m *Memory) ListKeys(_ context.Context, appID string) ([]APIKey, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []APIKey{}
+	for _, k := range m.keys {
+		if k.AppID == appID {
+			out = append(out, *k)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
 func (m *Memory) LookupKey(_ context.Context, hash string) (*Principal, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

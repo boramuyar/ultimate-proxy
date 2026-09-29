@@ -171,6 +171,8 @@ type Store interface {
 	// CreateKey stores a key by hash. It is idempotent for the same hash.
 	CreateKey(ctx context.Context, appID, hash, prefix string) (*APIKey, error)
 	RevokeKey(ctx context.Context, keyID string) error
+	// ListKeys returns an application's keys, revoked ones included, oldest first.
+	ListKeys(ctx context.Context, appID string) ([]APIKey, error)
 	// LookupKey returns ErrNotFound for unknown or revoked keys.
 	LookupKey(ctx context.Context, hash string) (*Principal, error)
 	InsertUsage(ctx context.Context, events []UsageEvent) error

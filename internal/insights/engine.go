@@ -311,7 +311,7 @@ func (e *Engine) rules(sc scope, w *window, t *totals) []finding {
 	if name == "" {
 		name = sc.app
 	}
-	win := e.cfg.Window.String()
+	win := fmtDuration(e.cfg.Window)
 	minReq := e.cfg.MinRequests
 	var out []finding
 
@@ -349,7 +349,7 @@ func (e *Engine) rules(sc scope, w *window, t *totals) []finding {
 		f.title = fmt.Sprintf("%s: %.0f%% of %s requests that should hit the prompt cache miss it", name, 100*f.rate, sc.model)
 		f.detail = fmt.Sprintf("These requests repeat a prefix sent within the last %s, yet the provider served none of it from cache. "+
 			"Set prompt_cache_key to a value shared by requests with the same prefix so they are routed to the same cache, "+
-			"and check that the traffic is not spread across accounts, regions or deployments.", e.cfg.CacheTTL)
+			"and check that the traffic is not spread across accounts, regions or deployments.", fmtDuration(e.cfg.CacheTTL))
 		f.evidence = map[string]any{
 			"window": win, "requests": denom, "unexpected_misses": t.unexpected, "rate": round(f.rate),
 			"missed_cached_tokens": t.missedTokens, "missed_savings_usd": round(t.missedCost),
@@ -412,3 +412,15 @@ func topCodes(codes map[string]int) string {
 }
 
 func round(f float64) float64 { return float64(int64(f*10000+0.5)) / 10000 }
+
+// fmtDuration prints 15m rather than 15m0s.
+func fmtDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}

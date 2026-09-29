@@ -121,6 +121,11 @@ func TestStores(t *testing.T) {
 				t.Fatalf("insights: open %+v all %+v", open, all)
 			}
 
+			keys, err := st.ListKeys(ctx, app.ID)
+			if err != nil || len(keys) != 1 || keys[0].ID != key.ID || keys[0].RevokedAt == nil {
+				t.Fatalf("list keys: %+v %v", keys, err)
+			}
+
 			jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 			for _, pr := range []*Price{
 				{ID: openresponses.NewID("price"), Model: "m1", Input: 2, CachedInput: 1, CacheWrite: 2, Output: 8, EffectiveFrom: jan.AddDate(0, 5, 0)},

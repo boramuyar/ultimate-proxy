@@ -20,7 +20,15 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to the config file")
+	healthcheck := flag.String("healthcheck", "", "GET this URL and exit 0 if it answers 200 (for container health checks)")
 	flag.Parse()
+	if *healthcheck != "" {
+		resp, err := (&http.Client{Timeout: 3 * time.Second}).Get(*healthcheck)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	if err := run(*configPath, log); err != nil {
 		log.Error("fatal", "err", err)
