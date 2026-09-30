@@ -54,7 +54,7 @@ func (p *ProxyTokens) Authenticate(ctx context.Context, token string) (*Identity
 	t, err := p.store.LookupProxyToken(ctx, hash)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		p.cache.Store(hash, cacheEntry{nil, now.Add(p.negativeTTL)})
+		p.cache.Store(hash, cacheEntry{expires: now.Add(p.negativeTTL)})
 		return nil, errInvalidToken
 	case err != nil:
 		return nil, openresponses.ServerError("auth_unavailable", "Could not verify the token.")
@@ -70,7 +70,7 @@ func (p *ProxyTokens) Authenticate(ctx context.Context, token string) (*Identity
 	if t.ExpiresAt.Before(expires) {
 		expires = t.ExpiresAt
 	}
-	p.cache.Store(hash, cacheEntry{id, expires})
+	p.cache.Store(hash, cacheEntry{id: id, expires: expires})
 	return id, nil
 }
 

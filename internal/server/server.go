@@ -86,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("GET /admin/applications", s.listApplications)
 	admin.HandleFunc("GET /admin/applications/{id}/keys", s.listKeys)
 	admin.HandleFunc("POST /admin/applications/{id}/keys", s.createKey)
+	admin.HandleFunc("PATCH /admin/keys/{id}", s.updateKey)
 	admin.HandleFunc("DELETE /admin/keys/{id}", s.revokeKey)
 	admin.HandleFunc("DELETE /admin/tokens/{id}", s.revokeToken)
 	admin.HandleFunc("GET /admin/usage", s.usage)

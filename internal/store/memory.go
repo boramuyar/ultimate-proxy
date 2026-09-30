@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -137,7 +138,35 @@ func (m *Memory) LookupKey(_ context.Context, hash string) (*Principal, error) {
 	}
 	a := m.apps[k.AppID]
 	t := m.tenants[a.TenantID]
-	return &Principal{KeyID: k.ID, TenantID: t.ID, TenantName: t.Name, AppID: a.ID, AppName: a.Name, CanAssertUsers: a.CanAssertUsers}, nil
+	return &Principal{KeyID: k.ID, TenantID: t.ID, TenantName: t.Name, AppID: a.ID, AppName: a.Name, CanAssertUsers: a.CanAssertUsers,
+		ExpiresAt: k.ExpiresAt, AllowedModels: slices.Clone(k.AllowedModels)}, nil
+}
+
+func (m *Memory) GetKey(_ context.Context, keyID string) (*APIKey, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, k := range m.keys {
+		if k.ID == keyID {
+			c := *k
+			c.AllowedModels = slices.Clone(k.AllowedModels)
+			return &c, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (m *Memory) SetKeyPolicy(_ context.Context, keyID string, expiresAt *time.Time, allowedModels []string) (*APIKey, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, k := range m.keys {
+		if k.ID == keyID {
+			k.ExpiresAt, k.AllowedModels = expiresAt, slices.Clone(allowedModels)
+			c := *k
+			c.AllowedModels = slices.Clone(k.AllowedModels)
+			return &c, nil
+		}
+	}
+	return nil, ErrNotFound
 }
 
 func (m *Memory) CreateProxyToken(_ context.Context, t *ProxyToken, hash string) error {

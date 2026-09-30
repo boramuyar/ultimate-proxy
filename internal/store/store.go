@@ -32,6 +32,10 @@ type APIKey struct {
 	Prefix    string     `json:"prefix"`
 	CreatedAt time.Time  `json:"created_at"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	// ExpiresAt is when the key stops working; nil never.
+	ExpiresAt *time.Time `json:"expires_at"`
+	// AllowedModels limits the models the key may use; nil allows all.
+	AllowedModels []string `json:"allowed_models"`
 }
 
 // Principal is who a request is billed to, resolved from its API key.
@@ -42,6 +46,8 @@ type Principal struct {
 	AppID          string
 	AppName        string
 	CanAssertUsers bool
+	ExpiresAt      *time.Time
+	AllowedModels  []string
 }
 
 // ProxyToken is a short-lived token the proxy minted for a client-side
@@ -193,7 +199,12 @@ type Store interface {
 	RevokeKey(ctx context.Context, keyID string) error
 	// ListKeys returns an application's keys, revoked ones included, oldest first.
 	ListKeys(ctx context.Context, appID string) ([]APIKey, error)
-	// LookupKey returns ErrNotFound for unknown or revoked keys.
+	// GetKey returns a key by ID, revoked or not.
+	GetKey(ctx context.Context, keyID string) (*APIKey, error)
+	// SetKeyPolicy sets a key's expiry and allowed models (nil: all).
+	SetKeyPolicy(ctx context.Context, keyID string, expiresAt *time.Time, allowedModels []string) (*APIKey, error)
+	// LookupKey returns ErrNotFound for unknown or revoked keys. Expired
+	// keys are returned; the caller checks ExpiresAt.
 	LookupKey(ctx context.Context, hash string) (*Principal, error)
 	// CreateProxyToken stores a minted token by hash, filling in its ID and
 	// creation time, and forgets tokens that expired over a day ago.

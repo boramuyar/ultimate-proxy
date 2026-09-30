@@ -307,3 +307,38 @@ func TestProxyTokens(t *testing.T) {
 		})
 	}
 }
+
+func TestKeyPolicy(t *testing.T) {
+	for name, st := range stores(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			ten, _ := st.EnsureTenant(ctx, "policy")
+			app, _ := st.EnsureApplication(ctx, ten.ID, "bot", true)
+			k, err := st.CreateKey(ctx, app.ID, "policy-hash", "up_pol")
+			if err != nil || k.ExpiresAt != nil || k.AllowedModels != nil {
+				t.Fatalf("new key: %+v, %v", k, err)
+			}
+			exp := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+			got, err := st.SetKeyPolicy(ctx, k.ID, &exp, []string{"smart", "openai/*"})
+			if err != nil || got.ExpiresAt == nil || !got.ExpiresAt.Equal(exp) || len(got.AllowedModels) != 2 {
+				t.Fatalf("set policy: %+v, %v", got, err)
+			}
+			p, err := st.LookupKey(ctx, "policy-hash")
+			if err != nil || p.ExpiresAt == nil || !p.ExpiresAt.Equal(exp) || p.AllowedModels[1] != "openai/*" {
+				t.Fatalf("lookup: %+v, %v", p, err)
+			}
+			if got, _ := st.GetKey(ctx, k.ID); got == nil || len(got.AllowedModels) != 2 {
+				t.Errorf("get: %+v", got)
+			}
+			if got, _ := st.SetKeyPolicy(ctx, k.ID, nil, nil); got == nil || got.ExpiresAt != nil || got.AllowedModels != nil {
+				t.Errorf("clear policy: %+v", got)
+			}
+			if _, err := st.SetKeyPolicy(ctx, "key_missing", nil, nil); !errors.Is(err, ErrNotFound) {
+				t.Errorf("missing key: %v", err)
+			}
+			if _, err := st.GetKey(ctx, "key_missing"); !errors.Is(err, ErrNotFound) {
+				t.Errorf("get missing key: %v", err)
+			}
+		})
+	}
+}

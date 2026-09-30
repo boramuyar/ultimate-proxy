@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Copy, KeyRound, Plus } from "lucide-react";
-import { api, type ApiKey, type Application, type Tenant } from "@/api";
+import { api, type ApiKey, type Application, type KeyPolicy, type Tenant } from "@/api";
 import type { PageProps } from "@/App";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertDialog,
@@ -127,12 +128,26 @@ function AppKeys({ app }: { app: Application }) {
   const [created, setCreated] = useState<ApiKey>();
   const [error, setError] = useState<string>();
   const [copied, setCopied] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [expiry, setExpiry] = useState("never");
+  const [models, setModels] = useState("");
 
-  async function createKey() {
+  async function createKey(e: FormEvent) {
+    e.preventDefault();
     setError(undefined);
+    const policy: KeyPolicy = {};
+    if (expiry !== "never") policy.expires_in = Number(expiry) * 86400;
+    const list = models
+      .split(",")
+      .map((m) => m.trim())
+      .filter(Boolean);
+    if (list.length > 0) policy.allowed_models = list;
     try {
-      setCreated(await api.createKey(app.id));
+      setCreated(await api.createKey(app.id, policy));
       setCopied(false);
+      setCreating(false);
+      setExpiry("never");
+      setModels("");
       keys.reload();
     } catch (err) {
       setError((err as Error).message);
@@ -157,10 +172,36 @@ function AppKeys({ app }: { app: Application }) {
           {app.can_assert_users ? <Badge variant="info">Names its users</Badge> : <Badge variant="muted">Untrusted client</Badge>}
           <span className="font-mono text-xs text-faint">{app.id}</span>
         </div>
-        <Button variant="outline" size="sm" onClick={createKey}>
+        <Button variant="outline" size="sm" onClick={() => setCreating((c) => !c)}>
           <KeyRound /> New key
         </Button>
       </div>
+      {creating && (
+        <form onSubmit={createKey} className="mx-5 mb-3 flex flex-wrap items-end gap-3 rounded-lg border bg-secondary p-3">
+          <div className="grid gap-1.5">
+            <Label>Expires</Label>
+            <Select value={expiry} onValueChange={setExpiry}>
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="never">Never</SelectItem>
+                <SelectItem value="7">In 7 days</SelectItem>
+                <SelectItem value="30">In 30 days</SelectItem>
+                <SelectItem value="90">In 90 days</SelectItem>
+                <SelectItem value="365">In a year</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid min-w-56 flex-1 gap-1.5">
+            <Label htmlFor={`models-${app.id}`}>Models</Label>
+            <Input id={`models-${app.id}`} placeholder="All models, or e.g. smart, openai/*" value={models} onChange={(e) => setModels(e.target.value)} />
+          </div>
+          <Button type="submit" size="sm">
+            Create key
+          </Button>
+        </form>
+      )}
       <div className="px-5">
         <ErrorBox error={error ?? keys.error} />
       </div>
@@ -192,6 +233,7 @@ function AppKeys({ app }: { app: Application }) {
             <TableRow>
               <TableHead>Key</TableHead>
               <TableHead>Created</TableHead>
+              <TableHead>Models</TableHead>
               <TableHead>Status</TableHead>
               <TableHead />
             </TableRow>
@@ -201,9 +243,12 @@ function AppKeys({ app }: { app: Application }) {
               <TableRow key={k.id}>
                 <TableCell className="font-mono text-[13px]">{k.prefix}…</TableCell>
                 <TableCell>{fmtTime(k.created_at)}</TableCell>
-                <TableCell>{k.revoked_at ? <Badge variant="muted">Revoked {fmtTime(k.revoked_at)}</Badge> : <Badge variant="good">Active</Badge>}</TableCell>
+                <TableCell className="text-[13px]">{k.allowed_models === null ? <span className="text-faint">All</span> : k.allowed_models.join(", ") || <span className="text-faint">None</span>}</TableCell>
+                <TableCell>
+                  <KeyStatus k={k} />
+                </TableCell>
                 <TableCell className="text-right">
-                  {!k.revoked_at && (
+                  {!k.revoked_at && !expired(k) && (
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button variant="outline" size="sm" className="text-critical hover:bg-critical-bg">
@@ -230,4 +275,18 @@ function AppKeys({ app }: { app: Application }) {
       )}
     </div>
   );
+}
+
+function expired(k: ApiKey): boolean {
+  return k.expires_at !== null && new Date(k.expires_at).getTime() <= Date.now();
+}
+
+function KeyStatus({ k }: { k: ApiKey }) {
+  if (k.revoked_at) return <Badge variant="muted">Revoked {fmtTime(k.revoked_at)}</Badge>;
+  if (expired(k)) return <Badge variant="muted">Expired {fmtTime(k.expires_at!)}</Badge>;
+  if (k.expires_at) {
+    const days = Math.ceil((new Date(k.expires_at).getTime() - Date.now()) / 86400000);
+    return <Badge variant={days <= 7 ? "warning" : "good"}>{days <= 1 ? "Expires within a day" : `Expires in ${days} days`}</Badge>;
+  }
+  return <Badge variant="good">Active</Badge>;
 }
