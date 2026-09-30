@@ -210,6 +210,7 @@ var usageColumns = []string{
 	"upstream_model", "stream", "status", "error_code", "http_status", "input_tokens", "cached_input_tokens",
 	"cache_write_tokens", "output_tokens", "reasoning_tokens", "usage_reported", "latency_ms", "ttft_ms",
 	"prompt_cache_key", "cost_usd", "cache_status", "expected_cached_tokens", "auth_method", "subject",
+	"deployment", "attempts",
 }
 
 func (p *Postgres) InsertUsage(ctx context.Context, events []UsageEvent) error {
@@ -221,6 +222,7 @@ func (p *Postgres) InsertUsage(ctx context.Context, events []UsageEvent) error {
 				e.UpstreamModel, e.Stream, e.Status, e.ErrorCode, e.HTTPStatus, e.InputTokens, e.CachedInputTokens,
 				e.CacheWriteTokens, e.OutputTokens, e.ReasoningTokens, e.UsageReported, e.LatencyMS, e.TTFTMS,
 				e.PromptCacheKey, e.CostUSD, e.CacheStatus, e.ExpectedCachedTokens, e.AuthMethod, e.Subject,
+				e.Deployment, max(e.Attempts, 1),
 			}, nil
 		}))
 	return err

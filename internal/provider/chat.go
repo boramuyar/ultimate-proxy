@@ -467,7 +467,7 @@ func (p *Chat) Create(ctx context.Context, call *Call, sink openresponses.Sink) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return nil, upstreamError(p.name, resp.StatusCode, openAIErrorMessage(resp.Body))
+		return nil, upstreamError(p.name, resp, openAIErrorMessage(resp.Body))
 	}
 
 	b := openresponses.NewBuilder(openresponses.NewResponse(call.ResponseID, call.Model, call.CreatedAt, req), sink)

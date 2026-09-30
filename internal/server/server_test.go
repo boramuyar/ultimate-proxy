@@ -52,10 +52,15 @@ admin_token: admin
 providers:
   - {name: openai, type: openai, base_url: "` + upSrv.URL + `/v1", api_key: fake-key}
   - {name: badkey, type: openai, base_url: "` + upSrv.URL + `/v1", api_key: wrong}
+  - name: pool
+    type: openai
+    base_url: "` + upSrv.URL + `/v1"
+    deployments: [{name: revoked, api_key: wrong}, {name: good, api_key: fake-key}]
   - {name: local, type: chat_completions, base_url: "` + upSrv.URL + `/v1", api_key: fake-key}
 models:
   - {name: gpt, provider: openai, upstream_model: gpt-fake}
   - {name: llama, provider: local, upstream_model: llama-fake}
+  - {name: resilient, provider: openai, upstream_model: gpt-fake, fallbacks: [llama]}
 insights:
   min_cacheable_tokens: 10
   min_requests: 5

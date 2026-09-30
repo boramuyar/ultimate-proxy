@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
@@ -69,28 +71,77 @@ func NewHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
 	return &http.Client{Transport: t}
 }
 
+// FailureKind says how routing should treat an upstream that failed before
+// sending anything.
+type FailureKind int
+
+const (
+	// Rejected: the upstream refused the request itself (400, 404, 422...).
+	// Another deployment would refuse it too.
+	Rejected FailureKind = iota
+	// RateLimited: 429. The deployment should cool down.
+	RateLimited
+	// Unavailable: 5xx, a connection error or a header timeout. Worth
+	// retrying, and counts toward the deployment's circuit breaker.
+	Unavailable
+	// AuthFailed: the upstream refused the proxy's credentials. The
+	// deployment's key is wrong or revoked.
+	AuthFailed
+)
+
+// Failure is an upstream failure before any event was sent, so the request
+// can be tried again elsewhere. It unwraps to the client-facing error.
+type Failure struct {
+	*openresponses.APIError
+	Kind       FailureKind
+	RetryAfter time.Duration // from the Retry-After header, if any
+}
+
+func (f *Failure) Unwrap() error { return f.APIError }
+
 // upstreamError maps a non-2xx upstream reply to a client-facing error. Client
 // errors keep their status; upstream auth and server failures become 502s so
 // callers can tell the proxy's upstream apart from their own request.
-func upstreamError(provider string, status int, message string) *openresponses.APIError {
+func upstreamError(provider string, resp *http.Response, message string) *Failure {
+	status := resp.StatusCode
+	f := &Failure{RetryAfter: retryAfter(resp.Header.Get("Retry-After"), time.Now())}
 	switch {
 	case status == http.StatusTooManyRequests:
-		return openresponses.NewError(status, openresponses.ErrTooManyRequests, "upstream_rate_limited", message, "")
+		f.Kind = RateLimited
+		f.APIError = openresponses.NewError(status, openresponses.ErrTooManyRequests, "upstream_rate_limited", message, "")
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		return openresponses.NewError(http.StatusBadGateway, openresponses.ErrServer, "upstream_auth_failed", provider+" rejected the proxy's credentials: "+message, "")
+		f.Kind = AuthFailed
+		f.APIError = openresponses.NewError(http.StatusBadGateway, openresponses.ErrServer, "upstream_auth_failed", provider+" rejected the proxy's credentials: "+message, "")
 	case status == http.StatusNotFound:
-		return openresponses.NewError(http.StatusBadRequest, openresponses.ErrInvalidRequest, "model_not_found", message, "model")
+		f.APIError = openresponses.NewError(http.StatusBadRequest, openresponses.ErrInvalidRequest, "model_not_found", message, "model")
 	case status >= 400 && status < 500:
-		return openresponses.NewError(status, openresponses.ErrInvalidRequest, "upstream_invalid_request", message, "")
+		f.APIError = openresponses.NewError(status, openresponses.ErrInvalidRequest, "upstream_invalid_request", message, "")
 	case status == 529 || status == http.StatusServiceUnavailable:
-		return openresponses.NewError(http.StatusServiceUnavailable, openresponses.ErrServer, "upstream_overloaded", message, "")
+		f.Kind = Unavailable
+		f.APIError = openresponses.NewError(http.StatusServiceUnavailable, openresponses.ErrServer, "upstream_overloaded", message, "")
 	default:
-		return openresponses.NewError(http.StatusBadGateway, openresponses.ErrServer, "upstream_error", message, "")
+		f.Kind = Unavailable
+		f.APIError = openresponses.NewError(http.StatusBadGateway, openresponses.ErrServer, "upstream_error", message, "")
 	}
+	return f
 }
 
-func networkError(provider string, err error) *openresponses.APIError {
-	return openresponses.NewError(http.StatusBadGateway, openresponses.ErrServer, "upstream_unreachable", provider+": "+err.Error(), "")
+// retryAfter parses a Retry-After header: seconds or an HTTP date.
+func retryAfter(v string, now time.Time) time.Duration {
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil && t.After(now) {
+		return t.Sub(now)
+	}
+	return 0
+}
+
+func networkError(provider string, err error) *Failure {
+	return &Failure{Kind: Unavailable, APIError: openresponses.NewError(http.StatusBadGateway, openresponses.ErrServer, "upstream_unreachable", provider+": "+err.Error(), "")}
 }
 
 func streamError(provider string, err error) *openresponses.APIError {

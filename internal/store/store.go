@@ -82,6 +82,8 @@ type UsageEvent struct {
 	Model             string
 	Provider          string
 	UpstreamModel     string
+	Deployment        string // the provider deployment that served it, never its key
+	Attempts          int    // upstream calls made, retries and fallbacks included
 	Stream            bool
 	Status            string // completed, incomplete, failed
 	ErrorCode         string

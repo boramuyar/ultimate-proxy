@@ -58,6 +58,8 @@ ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cache_status text NOT NULL DEF
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS expected_cached_tokens integer NOT NULL DEFAULT 0;
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS auth_method text NOT NULL DEFAULT '';
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS subject text NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS deployment text NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS insights (
     id          text PRIMARY KEY,

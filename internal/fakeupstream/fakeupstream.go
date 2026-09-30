@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,51 @@ type Server struct {
 	mu       sync.Mutex
 	prefixes map[[32]byte]bool // system prompts seen, to simulate prompt caching
 	Requests []json.RawMessage // raw upstream request bodies, for assertions
+	failN    int               // the next failN calls fail with failStatus
+	failStat int
+	Calls    int // model calls received, failed ones included
+}
+
+// FailNext makes the next n model calls fail with status, for testing
+// retries and fallbacks. A 429 carries Retry-After: 1.
+func (s *Server) FailNext(n, status int) {
+	s.mu.Lock()
+	s.failN, s.failStat = n, status
+	s.mu.Unlock()
+}
+
+// failing answers with the configured failure, if one is due.
+func (s *Server) failing(w http.ResponseWriter) bool {
+	s.mu.Lock()
+	s.Calls++
+	status := 0
+	if s.failN > 0 {
+		s.failN--
+		status = s.failStat
+	}
+	s.mu.Unlock()
+	if status == 0 {
+		return false
+	}
+	if status == http.StatusTooManyRequests {
+		w.Header().Set("Retry-After", "1")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(`{"error":{"message":"injected failure","type":"server_error"}}`))
+	return true
+}
+
+// failControl serves POST /fake/fail?n=3&status=503, so a compose run can
+// make the fake upstream fail.
+func (s *Server) failControl(w http.ResponseWriter, r *http.Request) {
+	n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+	status, _ := strconv.Atoi(r.URL.Query().Get("status"))
+	if status == 0 {
+		status = http.StatusServiceUnavailable
+	}
+	s.FailNext(n, status)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func New(apiKey string) *Server {
@@ -40,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/responses", s.responses)
 	mux.HandleFunc("POST /v1/chat/completions", s.chat)
+	mux.HandleFunc("POST /fake/fail", s.failControl)
 	return mux
 }
 
@@ -111,6 +158,9 @@ func exampleArgs(schema json.RawMessage) map[string]any {
 }
 
 func (s *Server) responses(w http.ResponseWriter, r *http.Request) {
+	if s.failing(w) {
+		return
+	}
 	if r.Header.Get("Authorization") != "Bearer "+s.APIKey {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
