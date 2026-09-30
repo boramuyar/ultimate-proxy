@@ -95,8 +95,8 @@ func (p *Postgres) CreateKey(ctx context.Context, appID, hash, prefix string) (*
 	err := p.pool.QueryRow(ctx, `
 		INSERT INTO api_keys (id, app_id, key_hash, prefix) VALUES ($1, $2, $3, $4)
 		ON CONFLICT (key_hash) DO UPDATE SET prefix = api_keys.prefix
-		RETURNING id, app_id, prefix, created_at, revoked_at`,
-		openresponses.NewID("key"), appID, hash, prefix).Scan(&k.ID, &k.AppID, &k.Prefix, &k.CreatedAt, &k.RevokedAt)
+		RETURNING `+keyColumns,
+		openresponses.NewID("key"), appID, hash, prefix).Scan(k.scanTargets()...)
 	if isForeignKeyViolation(err) {
 		return nil, ErrNotFound
 	}
@@ -116,24 +116,50 @@ func (p *Postgres) RevokeKey(ctx context.Context, keyID string) error {
 
 func (p *Postgres) ListKeys(ctx context.Context, appID string) ([]APIKey, error) {
 	rows, err := p.pool.Query(ctx, `
-		SELECT id, app_id, prefix, created_at, revoked_at FROM api_keys WHERE app_id = $1 ORDER BY created_at`, appID)
+		SELECT `+keyColumns+` FROM api_keys WHERE app_id = $1 ORDER BY created_at`, appID)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (APIKey, error) {
 		var k APIKey
-		err := r.Scan(&k.ID, &k.AppID, &k.Prefix, &k.CreatedAt, &k.RevokedAt)
+		err := r.Scan(k.scanTargets()...)
 		return k, err
 	})
+}
+
+const keyColumns = "id, app_id, prefix, created_at, revoked_at, expires_at, allowed_models"
+
+func (k *APIKey) scanTargets() []any {
+	return []any{&k.ID, &k.AppID, &k.Prefix, &k.CreatedAt, &k.RevokedAt, &k.ExpiresAt, &k.AllowedModels}
+}
+
+func (p *Postgres) GetKey(ctx context.Context, keyID string) (*APIKey, error) {
+	var k APIKey
+	err := p.pool.QueryRow(ctx, `SELECT `+keyColumns+` FROM api_keys WHERE id = $1`, keyID).Scan(k.scanTargets()...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &k, err
+}
+
+func (p *Postgres) SetKeyPolicy(ctx context.Context, keyID string, expiresAt *time.Time, allowedModels []string) (*APIKey, error) {
+	var k APIKey
+	err := p.pool.QueryRow(ctx, `
+		UPDATE api_keys SET expires_at = $2, allowed_models = $3 WHERE id = $1 RETURNING `+keyColumns,
+		keyID, expiresAt, allowedModels).Scan(k.scanTargets()...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &k, err
 }
 
 func (p *Postgres) LookupKey(ctx context.Context, hash string) (*Principal, error) {
 	var pr Principal
 	err := p.pool.QueryRow(ctx, `
-		SELECT k.id, t.id, t.name, a.id, a.name, a.can_assert_users
+		SELECT k.id, t.id, t.name, a.id, a.name, a.can_assert_users, k.expires_at, k.allowed_models
 		FROM api_keys k JOIN applications a ON a.id = k.app_id JOIN tenants t ON t.id = a.tenant_id
 		WHERE k.key_hash = $1 AND k.revoked_at IS NULL`, hash).
-		Scan(&pr.KeyID, &pr.TenantID, &pr.TenantName, &pr.AppID, &pr.AppName, &pr.CanAssertUsers)
+		Scan(&pr.KeyID, &pr.TenantID, &pr.TenantName, &pr.AppID, &pr.AppName, &pr.CanAssertUsers, &pr.ExpiresAt, &pr.AllowedModels)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

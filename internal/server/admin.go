@@ -101,10 +101,23 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, app)
 }
 
-// createKey returns the plaintext key once; only its hash is stored.
+// createKey returns the plaintext key once; only its hash is stored. The
+// optional body sets the key's policy, as updateKey does.
 func (s *Server) createKey(w http.ResponseWriter, r *http.Request) {
+	var p keyPolicy
+	if r.ContentLength != 0 && !decodeBody(w, r, &p) {
+		return
+	}
+	expiresAt, models, apiErr := p.apply(nil, nil)
+	if apiErr != nil {
+		openresponses.WriteError(w, apiErr)
+		return
+	}
 	key, hash := identity.NewKey()
 	k, err := s.store.CreateKey(r.Context(), r.PathValue("id"), hash, identity.DisplayPrefix(key))
+	if err == nil && (expiresAt != nil || models != nil) {
+		k, err = s.store.SetKeyPolicy(r.Context(), k.ID, expiresAt, models)
+	}
 	if err != nil {
 		s.adminError(w, err)
 		return
@@ -113,6 +126,76 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request) {
 		*store.APIKey
 		Key string `json:"key"`
 	}{k, key})
+}
+
+// updateKey serves PATCH /admin/keys/{id}, changing only the fields sent.
+func (s *Server) updateKey(w http.ResponseWriter, r *http.Request) {
+	var p keyPolicy
+	if !decodeBody(w, r, &p) {
+		return
+	}
+	k, err := s.store.GetKey(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.adminError(w, err)
+		return
+	}
+	expiresAt, models, apiErr := p.apply(k.ExpiresAt, k.AllowedModels)
+	if apiErr != nil {
+		openresponses.WriteError(w, apiErr)
+		return
+	}
+	if k, err = s.store.SetKeyPolicy(r.Context(), k.ID, expiresAt, models); err != nil {
+		s.adminError(w, err)
+		return
+	}
+	s.apiKeys.ForgetAll()
+	writeJSON(w, http.StatusOK, k)
+}
+
+// keyPolicy is the part of a key an admin can set. Absent fields keep their
+// value; null clears one.
+type keyPolicy struct {
+	ExpiresAt     json.RawMessage `json:"expires_at"`
+	ExpiresIn     *int64          `json:"expires_in"` // seconds from now
+	AllowedModels json.RawMessage `json:"allowed_models"`
+}
+
+func (p *keyPolicy) apply(expiresAt *time.Time, models []string) (*time.Time, []string, *openresponses.APIError) {
+	switch {
+	case p.ExpiresIn != nil && p.ExpiresAt != nil:
+		return nil, nil, openresponses.InvalidRequest("invalid_value", "Send expires_at or expires_in, not both.", "expires_in")
+	case p.ExpiresIn != nil:
+		if *p.ExpiresIn <= 0 {
+			return nil, nil, openresponses.InvalidRequest("invalid_value", "expires_in must be a positive number of seconds.", "expires_in")
+		}
+		t := time.Now().Add(time.Duration(*p.ExpiresIn) * time.Second).UTC().Truncate(time.Second)
+		expiresAt = &t
+	case p.ExpiresAt != nil:
+		expiresAt = nil
+		if string(p.ExpiresAt) != "null" {
+			var t time.Time
+			if err := json.Unmarshal(p.ExpiresAt, &t); err != nil {
+				return nil, nil, openresponses.InvalidRequest("invalid_value", "expires_at must be an RFC 3339 time or null.", "expires_at")
+			}
+			expiresAt = &t
+		}
+	}
+	if p.AllowedModels != nil {
+		models = nil
+		if string(p.AllowedModels) != "null" {
+			var list []string
+			if err := json.Unmarshal(p.AllowedModels, &list); err != nil {
+				return nil, nil, openresponses.InvalidRequest("invalid_value", "allowed_models must be a list of model names or null.", "allowed_models")
+			}
+			models = []string{}
+			for _, m := range list {
+				if m = strings.TrimSpace(m); m != "" {
+					models = append(models, m)
+				}
+			}
+		}
+	}
+	return expiresAt, models, nil
 }
 
 func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) {

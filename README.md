@@ -206,6 +206,17 @@ curl -s localhost:8080/admin/tenants/<tenant id>/applications -H "$ADMIN" -d '{"
 curl -s -X POST localhost:8080/admin/applications/<app id>/keys -H "$ADMIN"   # returns the key once
 ```
 
+A key can expire and be limited to some models. Both are optional, and can be changed later with
+`PATCH /admin/keys/<key id>` (send `null` to clear one):
+
+```sh
+curl -s -X POST localhost:8080/admin/applications/<app id>/keys -H "$ADMIN" \
+  -d '{"expires_in": 2592000, "allowed_models": ["smart", "openai/*"]}'   # or "expires_at": "2027-01-01T00:00:00Z"
+```
+
+An expired key gets `401 api_key_expired`, on time even though keys are cached for 30 seconds. A
+model outside the list gets `403 model_not_allowed` and is left out of `GET /v1/models`.
+
 Call the proxy with any Open Responses or OpenAI Responses client:
 
 ```sh

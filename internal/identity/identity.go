@@ -37,7 +37,7 @@ type Identity struct {
 	// AllowedModels limits the models the caller may use; nil allows all.
 	// Entries are model names or provider/model, and may end in *.
 	AllowedModels []string
-	// Expires is when the credential stops working; zero for API keys.
+	// Expires is when the credential stops working; zero for none.
 	Expires time.Time
 	// CanAssertUsers lets the caller name its end user in a header or in
 	// metadata.

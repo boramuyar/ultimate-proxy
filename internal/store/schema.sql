@@ -103,3 +103,6 @@ CREATE TABLE IF NOT EXISTS proxy_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS proxy_tokens_expires_at ON proxy_tokens (expires_at);
+
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS expires_at timestamptz;
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS allowed_models text[];

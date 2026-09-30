@@ -90,7 +90,14 @@ export interface ApiKey {
   prefix: string;
   created_at: string;
   revoked_at?: string;
+  expires_at: string | null;
+  allowed_models: string[] | null; // null: every model
   key?: string; // only when just created
+}
+
+export interface KeyPolicy {
+  expires_in?: number; // seconds
+  allowed_models?: string[] | null;
 }
 
 export type Dimension = "tenant" | "application" | "email" | "model" | "provider" | "cache";
@@ -162,7 +169,7 @@ export const api = {
   createApplication: (tenantId: string, name: string, canAssertUsers: boolean) =>
     request<Application>("POST", `/admin/tenants/${tenantId}/applications`, { name, can_assert_users: canAssertUsers }),
   keys: (appId: string) => request<List<ApiKey>>("GET", `/admin/applications/${appId}/keys`).then((r) => r.data),
-  createKey: (appId: string) => request<ApiKey>("POST", `/admin/applications/${appId}/keys`),
+  createKey: (appId: string, policy?: KeyPolicy) => request<ApiKey>("POST", `/admin/applications/${appId}/keys`, policy),
   revokeKey: (keyId: string) => request<void>("DELETE", `/admin/keys/${keyId}`),
 
   usage: (p: UsageParams) => {
