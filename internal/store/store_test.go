@@ -10,8 +10,9 @@ import (
 	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
 )
 
-// stores returns the memory store and, when TEST_DATABASE_URL is set, a
-// Postgres store, so both implementations answer the same queries the same way.
+// stores returns the memory store and, when TEST_DATABASE_URL or
+// TEST_CLICKHOUSE_URL is set, a Postgres store and a store keeping usage in
+// ClickHouse, so every implementation answers the same queries the same way.
 func stores(t *testing.T) map[string]Store {
 	t.Helper()
 	out := map[string]Store{"memory": NewMemory()}
@@ -25,6 +26,18 @@ func stores(t *testing.T) map[string]Store {
 		}
 		t.Cleanup(pg.Close)
 		out["postgres"] = pg
+	}
+	if url := os.Getenv("TEST_CLICKHOUSE_URL"); url != "" {
+		ch, err := NewClickHouse(context.Background(), url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ch.exec(context.Background(), "TRUNCATE TABLE usage_events", nil, ch.db); err != nil {
+			t.Fatal(err)
+		}
+		st := WithUsage(NewMemory(), ch)
+		t.Cleanup(st.Close)
+		out["clickhouse"] = st
 	}
 	return out
 }

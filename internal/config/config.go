@@ -16,6 +16,10 @@ type Config struct {
 	// DatabaseURL is a Postgres URL. When empty, the proxy keeps everything
 	// in memory (development only).
 	DatabaseURL string `yaml:"database_url"`
+	// ClickHouseURL is where the request log (usage events) goes, as
+	// http://user:password@host:8123/database. When empty, usage stays in
+	// the database_url store.
+	ClickHouseURL string `yaml:"clickhouse_url"`
 	// AdminToken is the old name of Admin.Token, still accepted.
 	AdminToken string `yaml:"admin_token"`
 	Admin      Admin  `yaml:"admin"`

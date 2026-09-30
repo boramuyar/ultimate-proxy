@@ -14,7 +14,7 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
 - End-user attribution from the `X-Proxy-User-Email` header, `metadata.user_email` or `safety_identifier`,
   accepted only from applications allowed to name their users.
 - Usage events (tokens in/out, cached, cache writes, reasoning, latency, time to first token) written to
-  Postgres in batches, off the request path.
+  ClickHouse in batches, off the request path. Tenants, keys, prices and insights stay in Postgres.
 - `GET /admin/usage` to answer "who used how many tokens", grouped by tenant, application, email, model
   or provider, optionally bucketed by hour or day.
 - Prompt-cache diagnosis on every request: whether the cache hit, and if not, why (see below).
@@ -28,7 +28,7 @@ limits. They are later phases in the design doc.
 
 ## Run it
 
-Everything runs with Docker Compose: the proxy, Postgres, the dashboard, and a free fake model
+Everything runs with Docker Compose: the proxy, Postgres, ClickHouse, the dashboard, and a free fake model
 (`fake-gpt`) to try things without a provider key.
 
 ```sh
@@ -43,12 +43,30 @@ scripts/demo-traffic.sh     # optional: sample tenants, traffic and cache proble
 | Proxy API | http://localhost:8080, demo key `up_demo_key` for the `demo/playground` application |
 
 The proxy config for the stack is `deploy/compose/config.yaml`: models `fake-gpt` (free), `smart` and
-`fast` (OpenAI, once `OPENAI_API_KEY` is set). Data lives in the `pgdata` volume; `docker compose down -v`
-wipes it. `POSTGRES_PASSWORD` only applies when that volume is first created.
+`fast` (OpenAI, once `OPENAI_API_KEY` is set). Tenants, keys and prices live in the `pgdata` volume and the
+request log in the `chdata` volume; `docker compose down -v` wipes both. `POSTGRES_PASSWORD` and
+`CLICKHOUSE_PASSWORD` only apply when their volume is first created.
 
 Without Docker: `go run ./cmd/ultimate-proxy -config config.yaml` (see `config.example.yaml`; without
-`database_url` everything is kept in memory), and `cd web && npm install && npm run dev` for the
+`database_url` everything is kept in memory, and without `clickhouse_url` usage stays in Postgres), and `cd web && npm install && npm run dev` for the
 dashboard on http://localhost:5173, which forwards `/admin` to `localhost:8080`.
+
+### Where data lives
+
+| Data | Store |
+| --- | --- |
+| Tenants, applications, API keys, prices, insights | Postgres (`database_url`) |
+| Request log: one usage event per request, and every `/admin/usage` query | ClickHouse (`clickhouse_url`) |
+
+ClickHouse is optional: leave `clickhouse_url` empty and usage events go to Postgres as before. To move
+events already in Postgres into ClickHouse, run this once in ClickHouse (for example with
+`docker compose exec clickhouse clickhouse-client -u proxy --password clickhouse -d proxy`); the two
+`usage_events` tables have the same columns in the same order:
+
+```sql
+INSERT INTO usage_events
+SELECT * FROM postgresql('postgres:5432', 'proxy', 'usage_events', 'postgres', '<POSTGRES_PASSWORD>');
+```
 
 ## Dashboard
 
@@ -201,6 +219,7 @@ traffic it sees. That is fine for rates; a shared store can come later if needed
 ```sh
 go test ./...                                         # unit and integration tests (fake upstream)
 TEST_DATABASE_URL=postgres://… go test ./internal/store  # also run the store tests against Postgres
+TEST_CLICKHOUSE_URL=http://user:pass@localhost:8123/proxy_test go test ./internal/store  # and ClickHouse
 go test -run x -bench Overhead ./internal/server      # proxy overhead vs. calling the upstream directly
 scripts/compliance.sh <openresponses checkout>        # official compliance suite
 ```

@@ -1,8 +1,13 @@
 # ${VAR} references are expanded from the environment.
 listen: ":8080"
 
-# Postgres for keys and usage. Leave empty to keep everything in memory (dev only).
+# Postgres for tenants, keys, prices and insights. Leave empty to keep
+# everything in memory (dev only).
 database_url: "${DATABASE_URL}"
+# ClickHouse for the request log (usage events), as
+# http://user:password@host:8123/database. Leave empty to keep usage in
+# Postgres instead, which is fine for small deployments.
+clickhouse_url: "${CLICKHOUSE_URL}"
 
 # Who may use /admin and the dashboard. With no token and no OIDC, the admin
 # API is disabled.

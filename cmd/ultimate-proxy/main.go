@@ -55,6 +55,15 @@ func run(configPath string, log *slog.Logger) error {
 		}
 		st = pg
 	}
+	if cfg.ClickHouseURL != "" {
+		ch, err := store.NewClickHouse(ctx, cfg.ClickHouseURL)
+		if err != nil {
+			st.Close()
+			return err
+		}
+		st = store.WithUsage(st, ch)
+		log.Info("keeping usage events in clickhouse")
+	}
 	defer st.Close()
 
 	m := meter.New(st, cfg.Usage.QueueSize, cfg.Usage.BatchSize, cfg.Usage.FlushInterval, log)
