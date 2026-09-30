@@ -65,7 +65,7 @@ func (s *Server) mintToken(w http.ResponseWriter, r *http.Request) {
 			}
 			names := []string{m}
 			if rt, ok := s.router.Resolve(m); ok {
-				names = append(names, rt.Provider.Name()+"/"+rt.UpstreamModel)
+				names = append(names, rt.QualifiedName())
 			}
 			if !covers(id.AllowedModels, names[0], names[1:]...) {
 				openresponses.WriteError(w, forbidden("model_not_allowed", "The minting credential may not use '"+m+"'.", "models"))

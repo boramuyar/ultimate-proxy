@@ -16,6 +16,7 @@ import (
 	"github.com/boramuyar/ultimate-proxy/internal/meter"
 	"github.com/boramuyar/ultimate-proxy/internal/metrics"
 	"github.com/boramuyar/ultimate-proxy/internal/pricing"
+	"github.com/boramuyar/ultimate-proxy/internal/routing"
 	"github.com/boramuyar/ultimate-proxy/internal/store"
 )
 
@@ -27,7 +28,7 @@ type Server struct {
 	apiKeys   *identity.APIKeys
 	tokens    *identity.ProxyTokens
 	meter     *meter.Meter
-	router    *Router
+	router    *routing.Router
 	prices    *pricing.Table
 	// insights is nil when insights are disabled.
 	insights *insights.Engine
@@ -35,7 +36,7 @@ type Server struct {
 }
 
 func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (*Server, error) {
-	router, err := NewRouter(cfg)
+	router, err := routing.New(cfg, log)
 	if err != nil {
 		return nil, err
 	}

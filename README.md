@@ -249,6 +249,30 @@ curl -s "localhost:8080/admin/usage?group_by=tenant,application,email&granularit
 
 Each row also carries `cost_usd` when the model had a price at the time of the request.
 
+## Retries, fallbacks and several keys
+
+A provider can have several `deployments`: API keys (for example different OpenAI projects) or
+servers (for example vLLM replicas). New requests are spread by `weight`. A model can list
+`fallbacks`, other aliases or `<provider>/<model>`, tried in order. See `config.example.yaml`.
+
+Each request tries the picked deployment, then the provider's other healthy deployments, then each
+fallback, up to `routing.max_attempts` calls:
+
+| Upstream answer | What happens |
+|---|---|
+| 429 | The deployment rests for `Retry-After` (or `routing.cooldown`), and the next one is tried at once. |
+| 5xx, connection error, header timeout | Backoff with jitter, then the next deployment (or the same one if it is the only one). Five in a row open the deployment's circuit breaker for `open_for`; then one request probes it. |
+| 401, 403 | The deployment's key is logged as bad and kept out for `open_for`; the next one is tried. |
+| 400, 404, anything after streaming started | Returned to the client, never retried. |
+
+Retries only happen before the first byte reaches the client, so a stream is never replayed. A
+request with `previous_response_id` or encrypted reasoning stays on its provider, because that
+state lives with the upstream account. Fallbacks a credential may not use are skipped. The usage
+log records the provider, upstream model and `deployment` that served each request and how many
+`attempts` it took, and the cost uses the price of what served it. Health is per proxy process.
+Metrics: `ultimate_proxy_upstream_attempts_total`, `ultimate_proxy_fallbacks_total` and
+`ultimate_proxy_breaker_open`.
+
 ## Prices
 
 Prices are rows in the `model_prices` table, in USD per million tokens. They are never edited: when a

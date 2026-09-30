@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
 	"github.com/boramuyar/ultimate-proxy/internal/pricing"
 	"github.com/boramuyar/ultimate-proxy/internal/provider"
+	"github.com/boramuyar/ultimate-proxy/internal/routing"
 	"github.com/boramuyar/ultimate-proxy/internal/sse"
 	"github.com/boramuyar/ultimate-proxy/internal/store"
 )
@@ -47,15 +50,21 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		openresponses.WriteError(w, openresponses.InvalidRequest("unsupported_parameter", "background responses are not supported yet.", "background"))
 		return
 	}
-	route, ok := s.router.Resolve(req.Model)
+	plan, ok := s.router.Plan(req.Model)
 	if !ok {
 		openresponses.WriteError(w, openresponses.InvalidRequest("model_not_found", "The requested model '"+req.Model+"' does not exist.", "model"))
 		return
 	}
-	if !id.AllowsModel(req.Model, route.Provider.Name()+"/"+route.UpstreamModel) {
+	primary := plan[0]
+	if !id.AllowsModel(req.Model, primary.QualifiedName()) {
 		openresponses.WriteError(w, errModelNotAllowed(req.Model))
 		return
 	}
+	// Fallbacks the caller may not use are skipped.
+	plan = slices.DeleteFunc(plan[1:], func(t routing.Target) bool {
+		return !id.AllowsModel(t.Name, t.QualifiedName())
+	})
+	plan = append([]routing.Target{primary}, plan...)
 
 	// Fingerprint the prompt prefix and note what the cache should hold for
 	// it. Caches are per upstream model, so that is the scope, per application.
@@ -66,17 +75,16 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	)
 	if s.insights != nil {
 		fp = insights.FromEnvelope(req)
-		cacheScope = id.AppID + "\x00" + route.Provider.Name() + "/" + route.UpstreamModel
+		cacheScope = id.AppID + "\x00" + primary.QualifiedName()
 		exp = s.insights.Tracker.Before(cacheScope, fp, start)
 	}
 
 	email, source := identity.ResolveUser(id, r, req)
 	call := &provider.Call{
-		Env:           req,
-		Model:         req.Model,
-		UpstreamModel: route.UpstreamModel,
-		ResponseID:    openresponses.NewID("resp"),
-		CreatedAt:     start.Unix(),
+		Env:        req,
+		Model:      req.Model,
+		ResponseID: openresponses.NewID("resp"),
+		CreatedAt:  start.Unix(),
 	}
 	w.Header().Set("X-Proxy-Request-Id", call.ResponseID)
 
@@ -91,7 +99,18 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		sink = ts
 	}
 
-	res, err := route.Provider.Create(ctx, call, sink)
+	// Retries happen only before anything reaches the client: adapters
+	// report a *provider.Failure only when they sent no event.
+	res, out, err := s.router.Run(ctx, plan, pinnedToUpstream(req), func(a routing.Attempt) (*provider.Result, error) {
+		call.UpstreamModel = a.Target.UpstreamModel
+		return a.Deployment.Adapter.Create(ctx, call, sink)
+	})
+	served := out.Target
+	// Price what actually served the request.
+	priceModel := req.Model
+	if served != primary {
+		priceModel = served.Name
+	}
 
 	ev := store.UsageEvent{
 		TS:            start.UTC(),
@@ -104,8 +123,10 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		UserEmail:     email,
 		UserSource:    source,
 		Model:         req.Model,
-		Provider:      route.Provider.Name(),
-		UpstreamModel: route.UpstreamModel,
+		Provider:      served.Pool.Name,
+		UpstreamModel: served.UpstreamModel,
+		Deployment:    out.Deployment.Name,
+		Attempts:      out.Attempts,
 		Stream:        req.Stream,
 		HTTPStatus:    http.StatusOK,
 	}
@@ -154,17 +175,18 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(res.Response)
 	}
 
-	cost, priced := s.prices.Cost(start, ev.Model, ev.Provider, ev.UpstreamModel, pricing.Usage{
+	cost, priced := s.prices.Cost(start, priceModel, ev.Provider, ev.UpstreamModel, pricing.Usage{
 		InputTokens: ev.InputTokens, CachedInputTokens: ev.CachedInputTokens,
 		CacheWriteTokens: ev.CacheWriteTokens, OutputTokens: ev.OutputTokens,
 	})
 	ev.CostUSD = cost
 	var missedCost float64
-	if fp != nil && ev.UsageReported && ev.Status != "failed" {
+	// The cache scope is the requested model's; a fallback has its own cache.
+	if fp != nil && ev.UsageReported && ev.Status != "failed" && served == primary {
 		ev.CacheStatus, ev.ExpectedCachedTokens = s.insights.Tracker.Classify(fp, exp, ev.InputTokens, ev.CachedInputTokens)
 		s.insights.Tracker.After(cacheScope, fp, time.Now())
 		if ev.CacheStatus == insights.CacheUnexpectedMiss && priced {
-			missedCost = float64(ev.ExpectedCachedTokens) * s.prices.SavingsPerCachedToken(start, ev.Model, ev.Provider, ev.UpstreamModel)
+			missedCost = float64(ev.ExpectedCachedTokens) * s.prices.SavingsPerCachedToken(start, priceModel, ev.Provider, ev.UpstreamModel)
 		}
 	}
 
@@ -257,7 +279,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	data := []model{}
 	for _, m := range s.router.Models() {
-		if rt, _ := s.router.Resolve(m); !id.AllowsModel(m, rt.Provider.Name()+"/"+rt.UpstreamModel) {
+		if rt, _ := s.router.Resolve(m); !id.AllowsModel(m, rt.QualifiedName()) {
 			continue
 		}
 		data = append(data, model{ID: m, Object: "model"})
@@ -274,4 +296,18 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// pinnedToUpstream reports whether the request carries state that belongs to
+// the upstream account that made it, so it must not move to another provider.
+func pinnedToUpstream(req *openresponses.Envelope) bool {
+	if req.PreviousResponseID != nil && *req.PreviousResponseID != "" {
+		return true
+	}
+	for _, it := range req.InputItems {
+		if bytes.Contains(it, []byte(`"encrypted_content"`)) && !bytes.Contains(it, []byte(`"encrypted_content":null`)) {
+			return true
+		}
+	}
+	return false
 }

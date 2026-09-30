@@ -84,7 +84,9 @@ CREATE TABLE IF NOT EXISTS usage_events (
     cache_status           LowCardinality(String),
     expected_cached_tokens Int32,
     auth_method            LowCardinality(String),
-    subject                String
+    subject                String,
+    deployment             LowCardinality(String),
+    attempts               UInt8
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMM(ts)
 ORDER BY (toDate(ts), tenant_id, app_id, ts)`
@@ -93,7 +95,9 @@ ORDER BY (toDate(ts), tenant_id, app_id, ts)`
 const clickhouseAddColumns = `
 ALTER TABLE usage_events
     ADD COLUMN IF NOT EXISTS auth_method LowCardinality(String),
-    ADD COLUMN IF NOT EXISTS subject String`
+    ADD COLUMN IF NOT EXISTS subject String,
+    ADD COLUMN IF NOT EXISTS deployment LowCardinality(String),
+    ADD COLUMN IF NOT EXISTS attempts UInt8 DEFAULT 1`
 
 // The hourly rollup has one row per hour and combination of the dimensions
 // usage can be grouped by. Background merges add rows with the same key
@@ -268,6 +272,8 @@ type chUsageEvent struct {
 	ExpectedCachedTokens int     `json:"expected_cached_tokens"`
 	AuthMethod           string  `json:"auth_method"`
 	Subject              string  `json:"subject"`
+	Deployment           string  `json:"deployment"`
+	Attempts             int     `json:"attempts"`
 }
 
 func (c *ClickHouse) InsertUsage(ctx context.Context, events []UsageEvent) error {
@@ -286,6 +292,7 @@ func (c *ClickHouse) InsertUsage(ctx context.Context, events []UsageEvent) error
 			OutputTokens: e.OutputTokens, ReasoningTokens: e.ReasoningTokens, UsageReported: e.UsageReported,
 			LatencyMS: e.LatencyMS, TTFTMS: e.TTFTMS, PromptCacheKey: e.PromptCacheKey, CostUSD: e.CostUSD,
 			CacheStatus: e.CacheStatus, ExpectedCachedTokens: e.ExpectedCachedTokens, AuthMethod: e.AuthMethod, Subject: e.Subject,
+			Deployment: e.Deployment, Attempts: min(max(e.Attempts, 1), 255),
 		}); err != nil {
 			return err
 		}

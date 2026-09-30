@@ -150,7 +150,10 @@ func TestJWTModelAllowlist(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		listed := len(decode(t, mresp)["data"].([]any)) == 1
+		listed := false
+		for _, m := range decode(t, mresp)["data"].([]any) {
+			listed = listed || m.(map[string]any)["id"] == "gpt"
+		}
 		if listed != (c.status == 200 && c.model == "gpt" || c.name == "claim wildcard") {
 			t.Errorf("%s: /v1/models listed gpt = %v", c.name, listed)
 		}

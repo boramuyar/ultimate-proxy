@@ -79,6 +79,9 @@ func chatText(raw json.RawMessage) (string, error) {
 // chat serves Chat Completions. It only streams, since the proxy always
 // asks for a stream.
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
+	if s.failing(w) {
+		return
+	}
 	if r.Header.Get("Authorization") != "Bearer "+s.APIKey {
 		chatError(w, http.StatusUnauthorized, "Incorrect API key provided.")
 		return

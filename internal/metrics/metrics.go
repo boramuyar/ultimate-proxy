@@ -66,6 +66,21 @@ var (
 		Help: "Open insights by kind.",
 	}, []string{"kind"})
 
+	UpstreamAttempts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ultimate_proxy_upstream_attempts_total",
+		Help: "Upstream calls by provider, deployment and outcome (ok, rate_limited, unavailable, auth_failed, rejected, error).",
+	}, []string{"provider", "deployment", "outcome"})
+
+	Fallbacks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ultimate_proxy_fallbacks_total",
+		Help: "Requests that moved from one model to a fallback.",
+	}, []string{"from", "to"})
+
+	BreakerOpen = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "ultimate_proxy_breaker_open",
+		Help: "1 while a deployment's circuit breaker is open.",
+	}, []string{"provider", "deployment"})
+
 	UsageQueueDepth = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "ultimate_proxy_usage_queue_depth",
 		Help: "Usage events waiting to be written.",
@@ -77,6 +92,6 @@ func init() {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		Requests, Tokens, Latency, TTFT, UpstreamErrors, UsageDropped, UsageWriteErrors, UsageQueueDepth,
-		CacheRequests, CacheMissedTokens, CostUSD, InsightsOpen,
+		CacheRequests, CacheMissedTokens, CostUSD, InsightsOpen, UpstreamAttempts, Fallbacks, BreakerOpen,
 	)
 }

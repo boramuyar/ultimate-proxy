@@ -62,6 +62,11 @@ providers:
   #   type: chat_completions
   #   base_url: http://vllm:8000/v1
   #   api_key: "${VLLM_API_KEY}"
+  #   # Several keys or replicas behind one provider. Each deployment inherits
+  #   # base_url, api_key and headers unless it sets its own.
+  #   deployments:
+  #     - {name: gpu-1, base_url: http://vllm-1:8000/v1, weight: 2}
+  #     - {name: gpu-2, base_url: http://vllm-2:8000/v1}
 
 # Client-facing model names. Clients can also send "<provider>/<model>",
 # for example "openai/gpt-5".
@@ -72,6 +77,16 @@ models:
   - name: fast
     provider: openai
     upstream_model: gpt-5-mini
+    # Tried in order when every deployment of this model fails.
+    # fallbacks: [smart, local/qwen3-32b]
+
+# Retries and fallbacks happen only before anything reached the client.
+# These are the defaults.
+# routing:
+#   max_attempts: 3                    # upstream calls per request, first included
+#   backoff: {base: 250ms, max: 2s}    # after 5xx and connection errors, with jitter
+#   cooldown: 10s                      # rest after a 429 without Retry-After
+#   breaker: {failures: 5, open_for: 30s}
 
 # Model prices live in the database, not here: add them with
 # POST /admin/prices (see the README).

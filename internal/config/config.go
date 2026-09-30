@@ -40,6 +40,7 @@ type Config struct {
 
 	Providers []Provider `yaml:"providers"`
 	Models    []Model    `yaml:"models"`
+	Routing   Routing    `yaml:"routing"`
 	Insights  Insights   `yaml:"insights"`
 	Bootstrap []Tenant   `yaml:"bootstrap"`
 }
@@ -172,6 +173,19 @@ type Provider struct {
 	BaseURL string            `yaml:"base_url"`
 	APIKey  string            `yaml:"api_key"`
 	Headers map[string]string `yaml:"headers"`
+	// Deployments spread a provider over several keys or servers. Each one
+	// inherits base_url, api_key and headers from the provider unless it sets
+	// its own. Without any, the provider is a single deployment named after it.
+	Deployments []Deployment `yaml:"deployments"`
+}
+
+type Deployment struct {
+	Name    string            `yaml:"name"`
+	BaseURL string            `yaml:"base_url"`
+	APIKey  string            `yaml:"api_key"`
+	Headers map[string]string `yaml:"headers"`
+	// Weight is this deployment's share of new traffic; default 1.
+	Weight int `yaml:"weight"`
 }
 
 // Model maps a client-facing model name to a provider and upstream model.
@@ -180,6 +194,30 @@ type Model struct {
 	Name          string `yaml:"name"`
 	Provider      string `yaml:"provider"`
 	UpstreamModel string `yaml:"upstream_model"`
+	// Fallbacks are tried in order when every deployment of this model
+	// fails: other aliases, or "<provider>/<upstream model>".
+	Fallbacks []string `yaml:"fallbacks"`
+}
+
+// Routing says how requests retry and move between deployments and models.
+// Retries only happen before anything was sent to the client.
+type Routing struct {
+	// MaxAttempts caps upstream calls per request, the first one included.
+	MaxAttempts int `yaml:"max_attempts"`
+	Backoff     struct {
+		Base time.Duration `yaml:"base"`
+		Max  time.Duration `yaml:"max"`
+	} `yaml:"backoff"`
+	// Cooldown is how long a deployment rests after a 429 that named no
+	// Retry-After.
+	Cooldown time.Duration `yaml:"cooldown"`
+	Breaker  struct {
+		// Failures in a row that open a deployment's breaker.
+		Failures int `yaml:"failures"`
+		// OpenFor is how long an open breaker keeps traffic away before one
+		// request probes the deployment again.
+		OpenFor time.Duration `yaml:"open_for"`
+	} `yaml:"breaker"`
 }
 
 // Tenant, Application and keys to create at startup, so a fresh deployment
@@ -222,6 +260,46 @@ func (c *Config) applyDefaults() {
 	}
 	if c.ResponseHeaderTimeout == 0 {
 		c.ResponseHeaderTimeout = 120 * time.Second
+	}
+	r := &c.Routing
+	if r.MaxAttempts == 0 {
+		r.MaxAttempts = 3
+	}
+	if r.Backoff.Base == 0 {
+		r.Backoff.Base = 250 * time.Millisecond
+	}
+	if r.Backoff.Max == 0 {
+		r.Backoff.Max = 2 * time.Second
+	}
+	if r.Cooldown == 0 {
+		r.Cooldown = 10 * time.Second
+	}
+	if r.Breaker.Failures == 0 {
+		r.Breaker.Failures = 5
+	}
+	if r.Breaker.OpenFor == 0 {
+		r.Breaker.OpenFor = 30 * time.Second
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if len(p.Deployments) == 0 {
+			p.Deployments = []Deployment{{Name: p.Name}}
+		}
+		for j := range p.Deployments {
+			d := &p.Deployments[j]
+			if d.BaseURL == "" {
+				d.BaseURL = p.BaseURL
+			}
+			if d.APIKey == "" {
+				d.APIKey = p.APIKey
+			}
+			if d.Headers == nil {
+				d.Headers = p.Headers
+			}
+			if d.Weight == 0 {
+				d.Weight = 1
+			}
+		}
 	}
 	if c.Usage.QueueSize == 0 {
 		c.Usage.QueueSize = 100_000
@@ -360,12 +438,23 @@ func (c *Config) validate() error {
 			return fmt.Errorf("duplicate provider %q", p.Name)
 		}
 		names[p.Name] = true
+		seen := map[string]bool{}
+		for _, d := range p.Deployments {
+			if d.Name == "" || seen[d.Name] {
+				return fmt.Errorf("provider %q: deployments need unique names", p.Name)
+			}
+			seen[d.Name] = true
+			if d.Weight < 0 {
+				return fmt.Errorf("provider %q: deployment %q has a negative weight", p.Name, d.Name)
+			}
+		}
 		switch p.Type {
 		case "openai", "chat_completions":
 		default:
 			return fmt.Errorf("provider %q: unknown type %q (want openai or chat_completions)", p.Name, p.Type)
 		}
 	}
+	aliases := map[string]bool{}
 	for _, m := range c.Models {
 		if m.Name == "" || m.UpstreamModel == "" {
 			return fmt.Errorf("model entries need name and upstream_model")
@@ -373,6 +462,24 @@ func (c *Config) validate() error {
 		if !names[m.Provider] {
 			return fmt.Errorf("model %q: unknown provider %q", m.Name, m.Provider)
 		}
+		aliases[m.Name] = true
+	}
+	for _, m := range c.Models {
+		for _, f := range m.Fallbacks {
+			prov, upstream, direct := strings.Cut(f, "/")
+			switch {
+			case f == m.Name:
+				return fmt.Errorf("model %q: falls back to itself", m.Name)
+			case aliases[f]:
+			case direct && names[prov] && upstream != "":
+			default:
+				return fmt.Errorf("model %q: fallback %q is neither a model nor <provider>/<model>", m.Name, f)
+			}
+		}
+	}
+	r := c.Routing
+	if r.MaxAttempts < 1 || r.Breaker.Failures < 1 || r.Backoff.Base < 0 || r.Backoff.Max < r.Backoff.Base || r.Cooldown < 0 || r.Breaker.OpenFor < 0 {
+		return fmt.Errorf("routing: max_attempts and breaker.failures must be at least 1, durations positive, and backoff.max at least backoff.base")
 	}
 	return nil
 }
