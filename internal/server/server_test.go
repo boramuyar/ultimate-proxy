@@ -56,6 +56,11 @@ providers:
     type: openai
     base_url: "` + upSrv.URL + `/v1"
     deployments: [{name: revoked, api_key: wrong}, {name: good, api_key: fake-key}]
+  - name: duo
+    type: openai
+    base_url: "` + upSrv.URL + `/v1"
+    api_key: fake-key
+    deployments: [{name: d1}, {name: d2}]
   - {name: local, type: chat_completions, base_url: "` + upSrv.URL + `/v1", api_key: fake-key}
 models:
   - {name: gpt, provider: openai, upstream_model: gpt-fake}
