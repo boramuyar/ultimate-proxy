@@ -23,7 +23,8 @@ type Server struct {
 	cfg       *config.Config
 	adminAuth *adminauth.Auth
 	store     store.Store
-	auth      *identity.Authenticator
+	auth      identity.Chain
+	apiKeys   *identity.APIKeys
 	meter     *meter.Meter
 	router    *Router
 	prices    *pricing.Table
@@ -37,7 +38,9 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, adminAuth: adminauth.New(cfg.Admin, log), store: st, auth: identity.NewAuthenticator(st), meter: m, router: router, prices: pricing.New(st, log), log: log}
+	s := &Server{cfg: cfg, adminAuth: adminauth.New(cfg.Admin, log), store: st, meter: m, router: router, prices: pricing.New(st, log), log: log}
+	s.apiKeys = identity.NewAPIKeys(st)
+	s.auth = identity.Chain{s.apiKeys}
 	if !cfg.Insights.Disabled {
 		var n insights.Notifier
 		if wh := insights.NewWebhooks(cfg.Insights.WebhookURL, cfg.Insights.SlackWebhookURL, log); wh != nil {

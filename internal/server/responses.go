@@ -23,7 +23,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	ctx := r.Context()
 
-	principal, apiErr := s.auth.Authenticate(ctx, r)
+	id, apiErr := s.auth.Authenticate(ctx, r)
 	if apiErr != nil {
 		openresponses.WriteError(w, apiErr)
 		return
@@ -62,11 +62,11 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	)
 	if s.insights != nil {
 		fp = insights.FromEnvelope(req)
-		cacheScope = principal.AppID + "\x00" + route.Provider.Name() + "/" + route.UpstreamModel
+		cacheScope = id.AppID + "\x00" + route.Provider.Name() + "/" + route.UpstreamModel
 		exp = s.insights.Tracker.Before(cacheScope, fp, start)
 	}
 
-	email, source := identity.ResolveUser(principal, r, req)
+	email, source := identity.ResolveUser(id, r, req)
 	call := &provider.Call{
 		Env:           req,
 		Model:         req.Model,
@@ -92,9 +92,9 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	ev := store.UsageEvent{
 		TS:            start.UTC(),
 		RequestID:     call.ResponseID,
-		TenantID:      principal.TenantID,
-		AppID:         principal.AppID,
-		KeyID:         principal.KeyID,
+		TenantID:      id.TenantID,
+		AppID:         id.AppID,
+		KeyID:         id.KeyID(),
 		UserEmail:     email,
 		UserSource:    source,
 		Model:         req.Model,
@@ -170,18 +170,18 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		metrics.TTFT.WithLabelValues(ev.Provider, ev.Model).Observe(ts.first.Sub(start).Seconds())
 	}
 	s.meter.Record(ev)
-	s.observe(&ev, principal, elapsed)
+	s.observe(&ev, id, elapsed)
 	if s.insights != nil {
 		s.insights.Record(insights.Observation{
-			TS: start, TenantID: principal.TenantID, TenantName: principal.TenantName,
-			AppID: principal.AppID, AppName: principal.AppName, Model: ev.Model,
+			TS: start, TenantID: id.TenantID, TenantName: id.TenantName,
+			AppID: id.AppID, AppName: id.AppName, Model: ev.Model,
 			Status: ev.Status, ErrorCode: ev.ErrorCode, CacheStatus: ev.CacheStatus,
 			ExpectedCachedTokens: ev.ExpectedCachedTokens, MissedCostUSD: missedCost,
 		})
 	}
 }
 
-func (s *Server) observe(ev *store.UsageEvent, p *store.Principal, elapsed time.Duration) {
+func (s *Server) observe(ev *store.UsageEvent, p *identity.Identity, elapsed time.Duration) {
 	metrics.Requests.WithLabelValues(p.TenantName, p.AppName, ev.Model, ev.Provider, ev.Status).Inc()
 	metrics.Latency.WithLabelValues(ev.Provider, ev.Model).Observe(elapsed.Seconds())
 	if ev.Status == "failed" {

@@ -1,101 +1,73 @@
-// Package identity authenticates API keys and works out which tenant,
+// Package identity authenticates callers and works out which tenant,
 // application and end user a request belongs to.
 package identity
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"errors"
 	"net/http"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
 )
 
-const KeyPrefix = "up_"
+// How a caller authenticated.
+const (
+	MethodAPIKey = "api_key"
+)
 
-// NewKey returns a new API key and its hash. Only the hash is stored.
-func NewKey() (key, hash string) {
-	var b [24]byte
-	_, _ = rand.Read(b[:])
-	key = KeyPrefix + base64.RawURLEncoding.EncodeToString(b[:])
-	return key, HashKey(key)
+// Identity is who a request is billed to, whatever credential it came with.
+// Tenant, application and user are plain values: for API keys they come from
+// the key's rows in the store.
+type Identity struct {
+	Method string
+	// Subject identifies the credential: the key ID for API keys.
+	Subject    string
+	TenantID   string
+	TenantName string
+	AppID      string
+	AppName    string
+	// User is the end user the credential itself names, if any. API keys name
+	// none; the application may assert one per request instead.
+	User string
+	// CanAssertUsers lets the caller name its end user in a header or in
+	// metadata.
+	CanAssertUsers bool
 }
 
-func HashKey(key string) string {
-	sum := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(sum[:])
-}
-
-// DisplayPrefix is the part of a key that is safe to show in listings.
-func DisplayPrefix(key string) string {
-	if len(key) > 10 {
-		return key[:10]
+// KeyID is the API key a request used, or "" for other credentials.
+func (id *Identity) KeyID() string {
+	if id.Method == MethodAPIKey {
+		return id.Subject
 	}
-	return key
+	return ""
 }
 
-// Authenticator resolves API keys to principals, caching lookups so the hot
-// path does not touch the database. Revocations take effect within
-// positiveTTL.
-type Authenticator struct {
-	store       store.Store
-	cache       sync.Map // hash -> cacheEntry
-	positiveTTL time.Duration
-	negativeTTL time.Duration
+// Authenticator turns a bearer token into an Identity.
+type Authenticator interface {
+	// Accepts reports whether the token is one this authenticator handles.
+	// The first authenticator in a chain that accepts a token decides it.
+	Accepts(token string) bool
+	Authenticate(ctx context.Context, token string) (*Identity, *openresponses.APIError)
 }
 
-type cacheEntry struct {
-	p       *store.Principal
-	expires time.Time
-}
-
-func NewAuthenticator(s store.Store) *Authenticator {
-	return &Authenticator{store: s, positiveTTL: 30 * time.Second, negativeTTL: 5 * time.Second}
-}
+// Chain tries authenticators in order.
+type Chain []Authenticator
 
 var errUnauthorized = openresponses.NewError(http.StatusUnauthorized, openresponses.ErrInvalidRequest, "invalid_api_key", "Missing or invalid API key.", "")
 
 // Authenticate reads the bearer token from the request.
-func (a *Authenticator) Authenticate(ctx context.Context, r *http.Request) (*store.Principal, *openresponses.APIError) {
-	key := BearerToken(r)
-	if key == "" {
+func (c Chain) Authenticate(ctx context.Context, r *http.Request) (*Identity, *openresponses.APIError) {
+	token := BearerToken(r)
+	if token == "" {
 		return nil, errUnauthorized
 	}
-	hash := HashKey(key)
-	now := time.Now()
-	if v, ok := a.cache.Load(hash); ok {
-		e := v.(cacheEntry)
-		if now.Before(e.expires) {
-			if e.p == nil {
-				return nil, errUnauthorized
-			}
-			return e.p, nil
+	for _, a := range c {
+		if a.Accepts(token) {
+			return a.Authenticate(ctx, token)
 		}
 	}
-	p, err := a.store.LookupKey(ctx, hash)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		a.cache.Store(hash, cacheEntry{nil, now.Add(a.negativeTTL)})
-		return nil, errUnauthorized
-	case err != nil:
-		return nil, openresponses.ServerError("auth_unavailable", "Could not verify the API key.")
-	}
-	a.cache.Store(hash, cacheEntry{p, now.Add(a.positiveTTL)})
-	return p, nil
+	return nil, errUnauthorized
 }
-
-// Forget drops a cached key so a revocation applies immediately on this node.
-func (a *Authenticator) Forget(hash string) { a.cache.Delete(hash) }
-
-// ForgetAll clears the cache.
-func (a *Authenticator) ForgetAll() { a.cache.Clear() }
 
 func BearerToken(r *http.Request) string {
 	h := r.Header.Get("Authorization")
@@ -109,11 +81,14 @@ func BearerToken(r *http.Request) string {
 const UserHeader = "X-Proxy-User-Email"
 
 // ResolveUser returns the end user a request is attributed to and where that
-// came from. Only applications trusted to assert users may name one; the
-// order is the X-Proxy-User-Email header, metadata.user_email, then
-// safety_identifier.
-func ResolveUser(p *store.Principal, r *http.Request, req *openresponses.Envelope) (email, source string) {
-	if !p.CanAssertUsers {
+// came from. A user named by the credential wins. Otherwise only callers
+// trusted to assert users may name one; the order is the X-Proxy-User-Email
+// header, metadata.user_email, then safety_identifier.
+func ResolveUser(id *Identity, r *http.Request, req *openresponses.Envelope) (email, source string) {
+	if id.User != "" {
+		return normalize(id.User), id.Method
+	}
+	if !id.CanAssertUsers {
 		return "", "none"
 	}
 	if v := strings.TrimSpace(r.Header.Get(UserHeader)); v != "" {
