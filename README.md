@@ -39,7 +39,7 @@ scripts/demo-traffic.sh     # optional: sample tenants, traffic and cache proble
 
 | What | Where |
 | --- | --- |
-| Dashboard | http://localhost:3000, sign in with `PROXY_ADMIN_TOKEN` (default `dev-admin-token`) |
+| Dashboard | http://localhost:3000, sign in with your identity provider (see [Signing in](#signing-in)) or `PROXY_ADMIN_TOKEN` (default `dev-admin-token`) |
 | Proxy API | http://localhost:8080, demo key `up_demo_key` for the `demo/playground` application |
 
 The proxy config for the stack is `deploy/compose/config.yaml`: models `fake-gpt` (free), `smart` and
@@ -61,6 +61,41 @@ The dashboard (`web/`: React, Tailwind CSS and shadcn/ui components, light theme
 - **Insights**: open and resolved problems with their cause and fix.
 - **Prices**: prices in effect and their history; add a new price.
 - **Tenants & keys**: create tenants, applications and keys; revoke keys.
+
+## Signing in
+
+The dashboard and `/admin` accept two kinds of sign-in, set under `admin:` in the config (or the
+`OIDC_*` variables in `.env` for the compose stack):
+
+- **Single sign-on** with any OpenID Connect provider: Google, Microsoft Entra ID, Okta, Auth0,
+  Keycloak, Authentik, Dex, GitLab and others. Register the proxy as a web application at the
+  provider with the redirect URI `<dashboard origin>/admin/auth/callback` (for the compose stack,
+  `http://localhost:3000/admin/auth/callback`), then set:
+
+  ```sh
+  OIDC_ISSUER=https://accounts.google.com      # the provider's issuer URL
+  OIDC_CLIENT_ID=...
+  OIDC_CLIENT_SECRET=...
+  OIDC_REDIRECT_URL=https://proxy.example.com/admin/auth/callback
+  OIDC_DISPLAY_NAME=Google                     # the button reads "Continue with Google"
+  OIDC_ALLOWED_DOMAINS=example.com             # and/or OIDC_ALLOWED_EMAILS, OIDC_ALLOWED_GROUPS
+  ADMIN_SESSION_SECRET=$(openssl rand -base64 32)
+  ```
+
+  Only people on an allow list get in: an email in `allowed_emails`, an email at a domain in
+  `allowed_domains`, or a group in `allowed_groups` (read from the ID token's `groups` claim, or
+  `groups_claim`; some providers need an extra scope in `OIDC_SCOPES` to send it). An email the
+  provider marks unverified is ignored. The proxy uses the authorization code flow with PKCE, checks
+  state and nonce, and verifies the ID token against the provider's keys.
+
+  A sign-in becomes a signed, HttpOnly session cookie that lasts `session_ttl` (12 hours by
+  default). The allow lists are checked on every request, so taking someone off a list and
+  restarting the proxy ends their session. Set `session_secret` so sessions survive restarts and
+  work across several proxies.
+
+- **The break-glass token**, `admin.token` (`PROXY_ADMIN_TOKEN`): a bearer token for scripts and
+  for when the provider is down. The dashboard offers it under the SSO button. Set it empty to turn
+  it off once single sign-on works.
 
 ## Use it
 

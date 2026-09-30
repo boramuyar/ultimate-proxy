@@ -9,6 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/boramuyar/ultimate-proxy/internal/adminauth"
 	"github.com/boramuyar/ultimate-proxy/internal/config"
 	"github.com/boramuyar/ultimate-proxy/internal/identity"
 	"github.com/boramuyar/ultimate-proxy/internal/insights"
@@ -19,12 +20,13 @@ import (
 )
 
 type Server struct {
-	cfg    *config.Config
-	store  store.Store
-	auth   *identity.Authenticator
-	meter  *meter.Meter
-	router *Router
-	prices *pricing.Table
+	cfg       *config.Config
+	adminAuth *adminauth.Auth
+	store     store.Store
+	auth      *identity.Authenticator
+	meter     *meter.Meter
+	router    *Router
+	prices    *pricing.Table
 	// insights is nil when insights are disabled.
 	insights *insights.Engine
 	log      *slog.Logger
@@ -35,7 +37,7 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, store: st, auth: identity.NewAuthenticator(st), meter: m, router: router, prices: pricing.New(st, log), log: log}
+	s := &Server{cfg: cfg, adminAuth: adminauth.New(cfg.Admin, log), store: st, auth: identity.NewAuthenticator(st), meter: m, router: router, prices: pricing.New(st, log), log: log}
 	if !cfg.Insights.Disabled {
 		var n insights.Notifier
 		if wh := insights.NewWebhooks(cfg.Insights.WebhookURL, cfg.Insights.SlackWebhookURL, log); wh != nil {
@@ -75,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("GET /admin/prices", s.listPrices)
 	admin.HandleFunc("POST /admin/prices", s.addPrice)
 	mux.Handle("/admin/", s.requireAdmin(admin))
+	mux.Handle("/admin/auth/", s.adminAuth.Handler())
 	return mux
 }
 

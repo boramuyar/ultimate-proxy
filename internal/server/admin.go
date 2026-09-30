@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,11 +12,11 @@ import (
 	"github.com/boramuyar/ultimate-proxy/internal/store"
 )
 
+// requireAdmin accepts a dashboard session or the break-glass bearer token.
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := identity.BearerToken(r)
-		if s.cfg.AdminToken == "" || subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.AdminToken)) != 1 {
-			openresponses.WriteError(w, openresponses.NewError(http.StatusUnauthorized, openresponses.ErrInvalidRequest, "invalid_admin_token", "Missing or invalid admin token.", ""))
+		if s.adminAuth.Authenticate(r) == nil {
+			openresponses.WriteError(w, openresponses.NewError(http.StatusUnauthorized, openresponses.ErrInvalidRequest, "invalid_admin_token", "Missing or invalid admin credentials.", ""))
 			return
 		}
 		next.ServeHTTP(w, r)

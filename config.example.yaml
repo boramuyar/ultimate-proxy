@@ -4,8 +4,29 @@ listen: ":8080"
 # Postgres for keys and usage. Leave empty to keep everything in memory (dev only).
 database_url: "${DATABASE_URL}"
 
-# Bearer token for /admin. Leave empty to disable the admin API.
-admin_token: "${PROXY_ADMIN_TOKEN}"
+# Who may use /admin and the dashboard. With no token and no OIDC, the admin
+# API is disabled.
+admin:
+  # Break-glass bearer token, for scripts and for when the identity provider
+  # is down. Leave empty to turn it off.
+  token: "${PROXY_ADMIN_TOKEN}"
+  # Signs session cookies. When empty, sessions end on restart.
+  session_secret: "${ADMIN_SESSION_SECRET}"
+  session_ttl: 12h
+  # Sign in with any OpenID Connect provider. Off while issuer is empty.
+  oidc:
+    issuer: "${OIDC_ISSUER}"               # e.g. https://accounts.google.com
+    client_id: "${OIDC_CLIENT_ID}"
+    client_secret: "${OIDC_CLIENT_SECRET}"
+    redirect_url: "${OIDC_REDIRECT_URL}"   # e.g. https://proxy.example.com/admin/auth/callback
+    display_name: "${OIDC_DISPLAY_NAME}"   # e.g. Google
+    # scopes: [openid, email, profile]
+    # Anyone matching any list may sign in. Set at least one. Entries may be
+    # comma-separated, as from an environment variable.
+    allowed_emails: ["${OIDC_ALLOWED_EMAILS}"]    # e.g. [you@example.com]
+    allowed_domains: ["${OIDC_ALLOWED_DOMAINS}"]  # e.g. [example.com]
+    allowed_groups: ["${OIDC_ALLOWED_GROUPS}"]    # e.g. [proxy-admins]
+    # groups_claim: groups
 
 providers:
   # Any upstream that speaks Open Responses (OpenAI's Responses API or a
