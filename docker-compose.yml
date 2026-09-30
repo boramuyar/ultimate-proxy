@@ -1,6 +1,6 @@
 # The whole stack: docker compose up -d --build
 #
-#   dashboard      http://localhost:3000   (sign in with PROXY_ADMIN_TOKEN)
+#   dashboard      http://localhost:3000   (sign in with SSO or PROXY_ADMIN_TOKEN)
 #   proxy          http://localhost:8080   (Open Responses API and /admin)
 #   postgres       internal only; data kept in the pgdata volume
 #   fake-upstream  internal only; the free "fake-gpt" model
@@ -33,7 +33,19 @@ services:
     ports: ["${PROXY_PORT:-8080}:8080"]
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/proxy
-      PROXY_ADMIN_TOKEN: ${PROXY_ADMIN_TOKEN:-dev-admin-token}
+      # Unset means the dev default; set but empty turns the token off.
+      PROXY_ADMIN_TOKEN: ${PROXY_ADMIN_TOKEN-dev-admin-token}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URL: ${OIDC_REDIRECT_URL:-http://localhost:3000/admin/auth/callback}
+      OIDC_DISPLAY_NAME: ${OIDC_DISPLAY_NAME:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+      OIDC_ALLOWED_EMAILS: ${OIDC_ALLOWED_EMAILS:-}
+      OIDC_ALLOWED_DOMAINS: ${OIDC_ALLOWED_DOMAINS:-}
+      OIDC_ALLOWED_GROUPS: ${OIDC_ALLOWED_GROUPS:-}
+      OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-}
       DEMO_APP_KEY: ${DEMO_APP_KEY:-up_demo_key}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes: ["./deploy/compose/config.yaml:/etc/ultimate-proxy/config.yaml:ro"]

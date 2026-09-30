@@ -1,24 +1,5 @@
 // Typed client for the proxy's admin API.
 
-const TOKEN_KEY = "up_admin_token";
-
-export function getToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setToken(token: string | null) {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* storage unavailable: the token lives for this page only */
-  }
-}
-
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -33,18 +14,27 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
 }
 
-async function request<T>(method: string, path: string, body?: unknown, token = getToken()): Promise<T> {
+// The session is an HttpOnly cookie the proxy sets at sign-in. The header
+// below proves a request came from this page, not another site.
+async function request<T>(method: string, path: string, body?: unknown, signOutOn401 = true): Promise<T> {
   const res = await fetch(path, {
     method,
+    credentials: "same-origin",
     headers: {
-      Authorization: `Bearer ${token ?? ""}`,
+      "X-Up-Admin": "1",
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (res.status === 401) {
-    onUnauthorized();
-    throw new ApiError(401, "Your admin token was rejected.");
+    if (signOutOn401) onUnauthorized();
+    let message = "Your session has ended. Sign in again.";
+    try {
+      message = (await res.json())?.error?.message ?? message;
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(401, message);
   }
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
@@ -59,6 +49,26 @@ async function request<T>(method: string, path: string, body?: unknown, token = 
   if (res.status === 204) return undefined as T;
   return res.json();
 }
+
+export interface AuthConfig {
+  token: boolean;
+  oidc?: { name: string };
+}
+
+export interface Principal {
+  email?: string;
+  name?: string;
+  method: "oidc" | "token";
+}
+
+export const auth = {
+  config: () => request<AuthConfig>("GET", "/admin/auth/config", undefined, false),
+  me: () => request<Principal>("GET", "/admin/auth/me", undefined, false),
+  // Full-page navigation: the provider's sign-in page, then back to next.
+  loginURL: (next: string) => `/admin/auth/login?next=${encodeURIComponent(next)}`,
+  token: (token: string) => request<Principal>("POST", "/admin/auth/token", { token }, false),
+  logout: () => request<void>("POST", "/admin/auth/logout", undefined, false),
+};
 
 export interface Tenant {
   id: string;
@@ -146,9 +156,6 @@ export interface NewPrice {
 type List<T> = { data: T[] };
 
 export const api = {
-  // Checks a token without storing it.
-  check: (token: string) => request<List<Tenant>>("GET", "/admin/tenants", undefined, token),
-
   tenants: () => request<List<Tenant>>("GET", "/admin/tenants").then((r) => r.data),
   createTenant: (name: string) => request<Tenant>("POST", "/admin/tenants", { name }),
   applications: () => request<List<Application>>("GET", "/admin/applications").then((r) => r.data),

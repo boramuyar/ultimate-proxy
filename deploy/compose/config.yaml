@@ -2,7 +2,26 @@
 # root). ${VAR}s come from .env next to docker-compose.yml.
 listen: ":8080"
 database_url: "${DATABASE_URL}"
-admin_token: "${PROXY_ADMIN_TOKEN}"
+
+# Who may use the dashboard and /admin. See "Signing in" in the README.
+admin:
+  # Break-glass token. Set PROXY_ADMIN_TOKEN= (empty) in .env to turn it off
+  # once single sign-on works.
+  token: "${PROXY_ADMIN_TOKEN}"
+  session_secret: "${ADMIN_SESSION_SECRET}"
+  # Single sign-on with any OpenID Connect provider; off while OIDC_ISSUER
+  # is empty.
+  oidc:
+    issuer: "${OIDC_ISSUER}"
+    client_id: "${OIDC_CLIENT_ID}"
+    client_secret: "${OIDC_CLIENT_SECRET}"
+    redirect_url: "${OIDC_REDIRECT_URL}"
+    display_name: "${OIDC_DISPLAY_NAME}"
+    scopes: ["${OIDC_SCOPES}"]
+    allowed_emails: ["${OIDC_ALLOWED_EMAILS}"]
+    allowed_domains: ["${OIDC_ALLOWED_DOMAINS}"]
+    allowed_groups: ["${OIDC_ALLOWED_GROUPS}"]
+    groups_claim: "${OIDC_GROUPS_CLAIM}"
 
 providers:
   # Free: a deterministic fake of the Responses API, running next to the proxy.

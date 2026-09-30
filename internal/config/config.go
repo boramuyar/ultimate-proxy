@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -15,8 +16,9 @@ type Config struct {
 	// DatabaseURL is a Postgres URL. When empty, the proxy keeps everything
 	// in memory (development only).
 	DatabaseURL string `yaml:"database_url"`
-	// AdminToken guards /admin. When empty, the admin API is disabled.
+	// AdminToken is the old name of Admin.Token, still accepted.
 	AdminToken string `yaml:"admin_token"`
+	Admin      Admin  `yaml:"admin"`
 
 	MaxRequestBytes       int64         `yaml:"max_request_bytes"`
 	ResponseHeaderTimeout time.Duration `yaml:"response_header_timeout"`
@@ -60,6 +62,50 @@ type Insights struct {
 	// SlackWebhookURL receives the same as a Slack message.
 	SlackWebhookURL string `yaml:"slack_webhook_url"`
 }
+
+// Admin configures who may use /admin and the dashboard. Sign-in is through
+// an OpenID Connect provider, a static token, or both. With neither, the
+// admin API is disabled.
+type Admin struct {
+	// Token is a break-glass bearer token, for scripts and for when the
+	// identity provider is down. Empty disables it.
+	Token string `yaml:"token"`
+	// SessionSecret signs dashboard session cookies. When empty, a random one
+	// is made at startup, so sessions end when the proxy restarts. Set it when
+	// running more than one proxy.
+	SessionSecret string        `yaml:"session_secret"`
+	SessionTTL    time.Duration `yaml:"session_ttl"`
+	OIDC          OIDC          `yaml:"oidc"`
+}
+
+// OIDC is any OpenID Connect provider: Google, Microsoft Entra ID, Okta,
+// Auth0, Keycloak, Authentik, Dex, GitLab and so on. It is on when Issuer is
+// set.
+type OIDC struct {
+	// Issuer is the provider's issuer URL; its discovery document is at
+	// <issuer>/.well-known/openid-configuration.
+	Issuer       string `yaml:"issuer"`
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	// RedirectURL is <dashboard origin>/admin/auth/callback, as registered
+	// with the provider.
+	RedirectURL string `yaml:"redirect_url"`
+	// DisplayName labels the sign-in button ("Continue with <name>").
+	DisplayName string   `yaml:"display_name"`
+	Scopes      []string `yaml:"scopes"`
+
+	// Who may sign in: anyone matching any of these. At least one is required.
+	// Each entry may hold several values separated by commas, so a list can
+	// come from one environment variable.
+	AllowedEmails  []string `yaml:"allowed_emails"`
+	AllowedDomains []string `yaml:"allowed_domains"`
+	AllowedGroups  []string `yaml:"allowed_groups"`
+	// GroupsClaim is the ID token claim holding the user's groups.
+	GroupsClaim string `yaml:"groups_claim"`
+}
+
+// Enabled reports whether OIDC sign-in is configured.
+func (o *OIDC) Enabled() bool { return o.Issuer != "" }
 
 type Provider struct {
 	Name    string            `yaml:"name"`
@@ -127,6 +173,27 @@ func (c *Config) applyDefaults() {
 	if c.Usage.FlushInterval == 0 {
 		c.Usage.FlushInterval = 250 * time.Millisecond
 	}
+	if c.Admin.Token == "" {
+		c.Admin.Token = c.AdminToken
+	}
+	if c.Admin.SessionTTL == 0 {
+		c.Admin.SessionTTL = 12 * time.Hour
+	}
+	o := &c.Admin.OIDC
+	o.AllowedEmails = splitList(o.AllowedEmails, true)
+	o.AllowedDomains = splitList(o.AllowedDomains, true)
+	o.AllowedGroups = splitList(o.AllowedGroups, false)
+	// Scopes are space-separated in OAuth; accept either.
+	o.Scopes = strings.Fields(strings.ReplaceAll(strings.Join(o.Scopes, " "), ",", " "))
+	if len(o.Scopes) == 0 {
+		o.Scopes = []string{"openid", "email", "profile"}
+	}
+	if o.GroupsClaim == "" {
+		o.GroupsClaim = "groups"
+	}
+	if o.DisplayName == "" {
+		o.DisplayName = "SSO"
+	}
 	in := &c.Insights
 	if in.CacheTTL == 0 {
 		in.CacheTTL = 5 * time.Minute
@@ -157,7 +224,37 @@ func (c *Config) applyDefaults() {
 	}
 }
 
+// splitList splits comma-separated entries and drops empty ones, which an
+// unset ${VAR} leaves behind.
+func splitList(in []string, lower bool) []string {
+	var out []string
+	for _, e := range in {
+		for _, v := range strings.Split(e, ",") {
+			v = strings.TrimSpace(v)
+			if lower {
+				v = strings.ToLower(v)
+			}
+			if v != "" {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
 func (c *Config) validate() error {
+	if o := c.Admin.OIDC; o.Enabled() {
+		if o.ClientID == "" || o.RedirectURL == "" {
+			return fmt.Errorf("admin.oidc: client_id and redirect_url are required with issuer")
+		}
+		u, err := url.Parse(o.RedirectURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "/admin/auth/callback" {
+			return fmt.Errorf("admin.oidc: redirect_url must be <dashboard origin>/admin/auth/callback, got %q", o.RedirectURL)
+		}
+		if len(o.AllowedEmails)+len(o.AllowedDomains)+len(o.AllowedGroups) == 0 {
+			return fmt.Errorf("admin.oidc: set allowed_emails, allowed_domains or allowed_groups, or every account at the provider could sign in")
+		}
+	}
 	names := map[string]bool{}
 	for _, p := range c.Providers {
 		if p.Name == "" || strings.Contains(p.Name, "/") {

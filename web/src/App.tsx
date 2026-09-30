@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { LogOut } from "lucide-react";
-import { api, getToken, setToken, setUnauthorizedHandler } from "@/api";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { LogIn, LogOut } from "lucide-react";
+import { api, auth, setUnauthorizedHandler, type AuthConfig, type Principal } from "@/api";
 import { DirectoryContext, useAsync, type Directory, type RangeKey } from "@/hooks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,20 +34,58 @@ function pageFromHash(): PageKey {
   return h in PAGES ? (h as PageKey) : "overview";
 }
 
+type AuthState =
+  | { status: "loading" }
+  | { status: "signed-in"; me: Principal }
+  | { status: "signed-out"; config?: AuthConfig; error?: string };
+
+// Reasons the proxy gives when it sends a failed sign-in back here.
+const LOGIN_ERRORS: Record<string, string> = {
+  not_allowed: "That account isn't allowed to use this dashboard. Ask the proxy's owner to add you.",
+  login_expired: "The sign-in took too long or was started elsewhere. Try again.",
+  provider_error: "The identity provider didn't complete the sign-in. Try again.",
+  provider_unavailable: "The identity provider can't be reached right now.",
+};
+
+// takeLoginError reads and clears ?login_error from the address bar.
+function takeLoginError(): string | undefined {
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get("login_error");
+  if (!code) return undefined;
+  url.searchParams.delete("login_error");
+  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  return LOGIN_ERRORS[code] ?? "Sign-in failed. Try again.";
+}
+
 export default function App() {
-  const [token, setTok] = useState(getToken());
-  useEffect(() => {
-    setUnauthorizedHandler(() => {
-      setToken(null);
-      setTok(null);
-    });
+  const [state, setState] = useState<AuthState>({ status: "loading" });
+
+  const signedOut = useCallback(async (error?: string) => {
+    setState({ status: "signed-out", error });
+    try {
+      setState({ status: "signed-out", error, config: await auth.config() });
+    } catch (err) {
+      setState({ status: "signed-out", error: error ?? (err as Error).message });
+    }
   }, []);
-  if (!token) return <Login onToken={setTok} />;
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => void signedOut("Your session has ended. Sign in again."));
+    const error = takeLoginError();
+    auth.me().then(
+      (me) => setState({ status: "signed-in", me }),
+      () => void signedOut(error),
+    );
+  }, [signedOut]);
+
+  if (state.status === "loading") return null;
+  if (state.status === "signed-out") return <Login config={state.config} initialError={state.error} onSignedIn={(me) => setState({ status: "signed-in", me })} />;
   return (
     <Dashboard
-      onSignOut={() => {
-        setToken(null);
-        setTok(null);
+      me={state.me}
+      onSignOut={async () => {
+        await auth.logout().catch(() => {});
+        void signedOut();
       }}
     />
   );
@@ -64,25 +102,29 @@ function Logo({ className }: { className?: string }) {
   );
 }
 
-function Login({ onToken }: { onToken: (t: string) => void }) {
+function Login({ config, initialError, onSignedIn }: { config?: AuthConfig; initialError?: string; onSignedIn: (me: Principal) => void }) {
   const [value, setValue] = useState("");
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState(initialError);
   const [busy, setBusy] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+  useEffect(() => setError(initialError), [initialError]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(undefined);
     try {
-      await api.check(value.trim());
-      setToken(value.trim());
-      onToken(value.trim());
+      onSignedIn(await auth.token(value.trim()));
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
   }
+
+  const oidc = config?.oidc;
+  const tokenForm = config?.token && (!oidc || showToken);
+  const next = window.location.pathname + window.location.hash;
 
   return (
     <div className="grid min-h-screen place-items-center bg-background p-4">
@@ -91,27 +133,51 @@ function Login({ onToken }: { onToken: (t: string) => void }) {
           <Logo className="size-9" />
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Sign in to ultimate-proxy</h1>
-            <p className="mt-1.5 text-muted-foreground">
-              Use the proxy's admin token, <code className="font-mono text-[13px] text-foreground">PROXY_ADMIN_TOKEN</code>.
-            </p>
+            {config && !oidc && config.token && (
+              <p className="mt-1.5 text-muted-foreground">
+                Use the proxy's admin token, <code className="font-mono text-[13px] text-foreground">PROXY_ADMIN_TOKEN</code>.
+              </p>
+            )}
           </div>
         </div>
-        <form onSubmit={submit} className="grid gap-4 rounded-xl border bg-card p-6 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+        <div className="grid gap-4 rounded-xl border bg-card p-6 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
           <ErrorBox error={error} />
-          <div className="grid gap-2">
-            <Label htmlFor="token">Admin token</Label>
-            <Input id="token" type="password" autoFocus value={value} onChange={(e) => setValue(e.target.value)} />
-          </div>
-          <Button type="submit" size="lg" disabled={!value.trim() || busy}>
-            {busy ? "Checking…" : "Continue"}
-          </Button>
-        </form>
+          {config && !oidc && !config.token && (
+            <p className="text-muted-foreground">
+              Sign-in isn't set up on this proxy. Configure <code className="font-mono text-[13px] text-foreground">admin.oidc</code> or{" "}
+              <code className="font-mono text-[13px] text-foreground">admin.token</code> in its config.
+            </p>
+          )}
+          {oidc && (
+            <Button asChild size="lg">
+              <a href={auth.loginURL(next)}>
+                <LogIn /> Continue with {oidc.name}
+              </a>
+            </Button>
+          )}
+          {oidc && config?.token && !showToken && (
+            <button type="button" onClick={() => setShowToken(true)} className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              Use the break-glass admin token
+            </button>
+          )}
+          {tokenForm && (
+            <form onSubmit={submit} className={cn("grid gap-4", oidc && "border-t pt-4")}>
+              <div className="grid gap-2">
+                <Label htmlFor="token">Admin token</Label>
+                <Input id="token" type="password" autoFocus={!oidc || showToken} value={value} onChange={(e) => setValue(e.target.value)} />
+              </div>
+              <Button type="submit" size="lg" variant={oidc ? "outline" : "default"} disabled={!value.trim() || busy}>
+                {busy ? "Checking…" : "Continue"}
+              </Button>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function Dashboard({ onSignOut }: { onSignOut: () => void }) {
+function Dashboard({ me, onSignOut }: { me: Principal; onSignOut: () => void }) {
   const [page, setPage] = useState<PageKey>(pageFromHash());
   const [range, setRange] = useState<RangeKey>("24h");
   useEffect(() => {
@@ -159,6 +225,9 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               <span className="hidden items-center gap-2 text-[13px] text-muted-foreground sm:flex" title="GET /healthz">
                 <span className={cn("size-2 rounded-full", health.data ? "bg-[#0cce6b]" : health.loading ? "bg-faint" : "bg-critical")} />
                 {health.data ? "Healthy" : health.loading ? "Checking" : "Unreachable"}
+              </span>
+              <span className="hidden max-w-[220px] truncate text-[13px] text-muted-foreground md:inline" title={me.email}>
+                {me.method === "token" ? "Admin token" : (me.email ?? me.name)}
               </span>
               <Button variant="outline" size="sm" onClick={onSignOut}>
                 <LogOut /> Sign out
