@@ -95,7 +95,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	dec, limitErr := s.limits.Check(ctx, limitSubject(id.TenantID, id.AppID, email))
 	dec.Headers(w.Header())
 	if !dec.Allowed {
-		ae := openresponses.NewError(http.StatusTooManyRequests, openresponses.ErrTooManyRequests, "rate_limit_exceeded", dec.Message(), "")
+		ae := openresponses.NewError(http.StatusTooManyRequests, openresponses.ErrTooManyRequests, dec.Code(), dec.Message(), "")
 		if limitErr != nil {
 			ae = openresponses.NewError(http.StatusServiceUnavailable, openresponses.ErrServer, "limits_unavailable", dec.Message(), "")
 		}
@@ -254,13 +254,13 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	s.meter.Record(ev)
 	s.observe(&ev, id, elapsed)
-	// Charge token limits off the request path: the response only
-	// completes when the handler returns.
-	if n := ev.InputTokens + ev.OutputTokens; n > 0 && dec.ChargesTokens() {
+	// Charge token limits and budgets off the request path: the response
+	// only completes when the handler returns.
+	if n := ev.InputTokens + ev.OutputTokens; (n > 0 || ev.CostUSD > 0) && dec.Charges() {
 		go func() {
 			cctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			s.limits.Charge(cctx, dec, n)
+			s.limits.Charge(cctx, dec, n, ev.CostUSD)
 		}()
 	}
 	if s.insights != nil {

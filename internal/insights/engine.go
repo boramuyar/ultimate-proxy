@@ -82,6 +82,9 @@ type Engine struct {
 	mu     sync.Mutex
 	scopes map[scope]*window
 	open   map[string]*store.Insight // by kind|tenant|app|model
+	// budgets holds open budget insights by rule|user|period end; they
+	// resolve when the period ends, not when traffic goes quiet.
+	budgets map[string]*store.Insight
 }
 
 func NewEngine(cfg config.Insights, st store.Store, n Notifier, log *slog.Logger) *Engine {
@@ -93,6 +96,7 @@ func NewEngine(cfg config.Insights, st store.Store, n Notifier, log *slog.Logger
 		Tracker: NewTracker(cfg.CacheTTL, cfg.MinCacheableTokens),
 		scopes:  map[scope]*window{},
 		open:    map[string]*store.Insight{},
+		budgets: map[string]*store.Insight{},
 	}
 }
 
@@ -106,8 +110,13 @@ func (e *Engine) Load(ctx context.Context) error {
 	defer e.mu.Unlock()
 	for i := range open {
 		in := open[i]
-		e.open[openKey(in.Kind, scope{in.TenantID, in.AppID, in.Model})] = &in
 		metrics.InsightsOpen.WithLabelValues(in.Kind).Inc()
+		if in.Kind == KindBudget {
+			resets, _ := time.Parse(time.RFC3339, fmt.Sprint(in.Evidence["resets_at"]))
+			e.budgets[budgetKey(fmt.Sprint(in.Evidence["limit_id"]), fmt.Sprint(in.Evidence["user"]), resets)] = &in
+			continue
+		}
+		e.open[openKey(in.Kind, scope{in.TenantID, in.AppID, in.Model})] = &in
 	}
 	return nil
 }
@@ -274,6 +283,9 @@ func (e *Engine) Evaluate(ctx context.Context, now time.Time) {
 			metrics.InsightsOpen.WithLabelValues(in.Kind).Dec()
 			changes = append(changes, change{"resolved", *in})
 		}
+	}
+	for _, in := range e.resolveBudgets(now) {
+		changes = append(changes, change{"resolved", in})
 	}
 	e.mu.Unlock()
 

@@ -14,6 +14,7 @@ const KIND_LABEL: Record<string, string> = {
   cache_unexpected_miss: "Unexpected cache misses",
   error_rate: "Error rate",
   truncation: "Truncated responses",
+  budget_threshold: "Budget",
 };
 
 type Status = "open" | "resolved" | "all";
@@ -58,7 +59,7 @@ function InsightCard({ insight: i }: { insight: Insight }) {
     ["model", i.model],
     ["since", fmtTime(i.first_seen)],
     ...evidence(i.evidence),
-  ];
+  ].filter(([, v]) => v !== "") as [string, string][];
 
   return (
     <Card>
@@ -94,6 +95,14 @@ function evidence(e: Record<string, unknown>): [string, string][] {
   const out: [string, string][] = [];
   const num = (k: string) => (typeof e[k] === "number" ? (e[k] as number) : undefined);
   if (e.window) out.push(["window", String(e.window)]);
+  if (num("share") !== undefined) {
+    const used = e.kind === "budget_usd" ? fmtUSD(num("used")!) : fmtNumber(num("used")!);
+    const amount = e.kind === "budget_usd" ? fmtUSD(num("amount")!) : fmtNumber(num("amount")!);
+    out.push(["used", `${used} of ${amount} (${fmtPct(num("share")!)})`]);
+  }
+  if (e.user) out.push(["user", String(e.user)]);
+  if (e.enforcement) out.push(["enforcement", String(e.enforcement)]);
+  if (typeof e.resets_at === "string") out.push(["resets", fmtTime(e.resets_at)]);
   if (num("requests") !== undefined) out.push(["requests", fmtNumber(num("requests")!)]);
   if (num("rate") !== undefined) out.push(["rate", fmtPct(num("rate")!)]);
   if (num("missed_cached_tokens")) out.push(["tokens not cached", fmtNumber(num("missed_cached_tokens")!)]);

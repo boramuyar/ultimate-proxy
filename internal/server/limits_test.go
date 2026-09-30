@@ -3,8 +3,10 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // app returns the tenant and application IDs of the application named name.
@@ -115,12 +117,16 @@ func TestLimitAdmin(t *testing.T) {
 	tenant, app := h.app(t, "chat")
 	_, otherApp := h.app(t, "widget")
 	for body, want := range map[string]int{
-		`{"tenant_id":"` + tenant + `","kind":"rpm"}`:                                                400,
-		`{"tenant_id":"` + tenant + `","kind":"rph","amount":1}`:                                     400,
-		`{"tenant_id":"` + tenant + `","kind":"rpm","amount":0}`:                                     400,
-		`{"tenant_id":"nope","kind":"rpm","amount":1}`:                                               400,
-		`{"tenant_id":"` + tenant + `","application_id":"` + otherApp + `","kind":"rpm","amount":1}`: 400,
-		`{"tenant_id":"` + tenant + `","kind":"rpm","amount":1,"enforcement":"soft"}`:                400,
+		`{"tenant_id":"` + tenant + `","kind":"rpm"}`:                                                       400,
+		`{"tenant_id":"` + tenant + `","kind":"rph","amount":1}`:                                            400,
+		`{"tenant_id":"` + tenant + `","kind":"rpm","amount":0}`:                                            400,
+		`{"tenant_id":"nope","kind":"rpm","amount":1}`:                                                      400,
+		`{"tenant_id":"` + tenant + `","application_id":"` + otherApp + `","kind":"rpm","amount":1}`:        400,
+		`{"tenant_id":"` + tenant + `","kind":"rpm","amount":1,"enforcement":"soft"}`:                       400,
+		`{"tenant_id":"` + tenant + `","kind":"rpm","amount":1,"period":"day"}`:                             400,
+		`{"tenant_id":"` + tenant + `","kind":"budget_usd","amount":1}`:                                     400,
+		`{"tenant_id":"` + tenant + `","kind":"budget_usd","amount":1,"period":"year"}`:                     400,
+		`{"tenant_id":"` + tenant + `","kind":"budget_usd","amount":1,"period":"day","enforcement":"warn"}`: 400,
 	} {
 		resp := h.admin(http.MethodPost, "/admin/limits", body)
 		if b := decode(t, resp); resp.StatusCode != want {
@@ -147,5 +153,51 @@ func TestLimitAdmin(t *testing.T) {
 	}
 	if resp := h.post(trustedKey, `{"model":"gpt","input":"hi"}`); resp.StatusCode != 200 {
 		t.Errorf("deleted limit still applied: %d", resp.StatusCode)
+	}
+}
+
+func TestTokenBudget(t *testing.T) {
+	h := newHarness(t)
+	tenant, _ := h.app(t, "chat")
+	l := h.addLimit(t, `{"tenant_id":"`+tenant+`","kind":"budget_tokens","amount":10,"period":"day"}`)
+	resp := h.post(trustedKey, `{"model":"gpt","input":"a long enough prompt to use more than ten tokens in the fake upstream"}`)
+	decode(t, resp)
+	if resp.StatusCode != 200 {
+		t.Fatalf("first request: %d", resp.StatusCode)
+	}
+	var body map[string]any
+	for range 100 {
+		resp = h.post(trustedKey, `{"model":"gpt","input":"hi"}`)
+		if body = decode(t, resp); resp.StatusCode == 429 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	e, _ := body["error"].(map[string]any)
+	if resp.StatusCode != 429 || e["code"] != "budget_exceeded" || !strings.Contains(e["message"].(string), "per day") {
+		t.Fatalf("budget never applied: %d %v", resp.StatusCode, body)
+	}
+	if ra, _ := strconv.Atoi(resp.Header.Get("Retry-After")); ra <= 0 || ra > 86400 {
+		t.Errorf("Retry-After %q should run to midnight UTC", resp.Header.Get("Retry-After"))
+	}
+	// The crossing opened an insight.
+	resp = h.admin(http.MethodGet, "/admin/insights", "")
+	ins := decode(t, resp)["data"].([]any)
+	if len(ins) != 1 || ins[0].(map[string]any)["kind"] != "budget_threshold" || ins[0].(map[string]any)["severity"] != "critical" {
+		t.Fatalf("insights %v", ins)
+	}
+	// Soft budgets warn but allow.
+	resp = h.admin(http.MethodPatch, "/admin/limits/"+l["id"].(string), `{"enforcement":"soft"}`)
+	decode(t, resp)
+	if resp.StatusCode != 200 {
+		t.Fatalf("patch: %d", resp.StatusCode)
+	}
+	if resp := h.post(trustedKey, `{"model":"gpt","input":"hi"}`); resp.StatusCode != 200 {
+		t.Fatalf("soft budget refused: %d", resp.StatusCode)
+	}
+	resp = h.admin(http.MethodGet, "/admin/limits/status", "")
+	st := decode(t, resp)["data"].([]any)[0].(map[string]any)
+	if st["used"].(float64) <= 10 || st["resets_at"] == nil {
+		t.Errorf("status %v", st)
 	}
 }

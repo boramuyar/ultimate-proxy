@@ -36,8 +36,8 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
 - Cost in USD from a versioned prices table, on every usage event and in `/admin/usage`.
 - Prometheus metrics at `/metrics`.
 
-Not built yet: WebSocket transport, `/v1/responses/compact`, background responses, and spend
-budgets. They are later phases in the design doc.
+Not built yet: WebSocket transport, `/v1/responses/compact` and background responses. They are
+later phases in the design doc.
 
 ## Run it
 
@@ -316,6 +316,31 @@ more than one. If Valkey is unreachable, requests are let through and
 Rules are cached in each proxy and reread every 10 seconds, so the database is never on the request
 path.
 
+### Budgets
+
+Budgets are rules of kind `budget_usd` (spend, costed with the prices table) or `budget_tokens`
+(input plus output tokens) over a calendar `period`: `day`, `week` (from Monday) or `month`, in UTC.
+They apply to the same scopes as rate limits.
+
+```sh
+# $500 a month for the tenant; 200k tokens a day for each user of one application, alerting only.
+curl -s -X POST localhost:8080/admin/limits -H "$ADMIN" \
+  -d '{"tenant_id": "<tenant id>", "kind": "budget_usd", "amount": 500, "period": "month"}'
+curl -s -X POST localhost:8080/admin/limits -H "$ADMIN" -d '{"tenant_id": "<tenant id>",
+  "application_id": "<app id>", "user": "*", "kind": "budget_tokens", "amount": 200000, "period": "day", "enforcement": "soft"}'
+```
+
+A `hard` budget (the default) refuses requests once it is used up, with `429 budget_exceeded` and a
+`Retry-After` that runs to the start of the next period. A `soft` budget never refuses. Both open a
+`budget_threshold` insight when they pass 80%, raise it to critical at 100% (webhook event
+`insight.escalated`), and resolve it when the period ends. Switch between them with
+`PATCH /admin/limits/<id> {"enforcement": "soft"}`.
+
+Like token limits, budgets are charged after each response, so requests already running can take a
+budget a little past 100%. The counters in Valkey are only a cache: each proxy rebuilds them from the
+usage log at startup, every hour, and when a budget is created, so a budget added mid-month starts from
+what was already spent and a Valkey restart loses nothing.
+
 ## Prices
 
 Prices are rows in the `model_prices` table, in USD per million tokens. They are never edited: when a
@@ -372,7 +397,8 @@ curl -s "localhost:8080/admin/insights?status=all" -H "$ADMIN"       # open and 
 ```
 
 Set `insights.webhook_url` for a JSON POST (`{"event":"insight.opened","insight":{…}}`) or
-`insights.slack_webhook_url` for a Slack message on every open and resolve. Prometheus gets
+`insights.slack_webhook_url` for a Slack message on every open and resolve (and when a budget
+insight turns critical, `insight.escalated`). Prometheus gets
 `ultimate_proxy_cache_requests_total{status}`, `ultimate_proxy_cache_missed_tokens_total`,
 `ultimate_proxy_cost_usd_total` and `ultimate_proxy_insights_open{kind}`.
 
