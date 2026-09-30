@@ -89,3 +89,17 @@ CREATE TABLE IF NOT EXISTS model_prices (
 );
 
 CREATE INDEX IF NOT EXISTS model_prices_model_effective ON model_prices (model, effective_from);
+
+CREATE TABLE IF NOT EXISTS proxy_tokens (
+    id             text PRIMARY KEY,
+    token_hash     text NOT NULL UNIQUE,
+    app_id         text NOT NULL REFERENCES applications (id),
+    user_email     text NOT NULL,
+    allowed_models text[],
+    minted_by      text NOT NULL,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    expires_at     timestamptz NOT NULL,
+    revoked_at     timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS proxy_tokens_expires_at ON proxy_tokens (expires_at);

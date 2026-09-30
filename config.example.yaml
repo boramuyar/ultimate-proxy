@@ -44,6 +44,9 @@ admin:
 #       claims: {app: azp, user: email, groups: groups, models: llm_models}
 #       group_models:
 #         ml-team: [smart, openai/*]
+#   # Web pages allowed to call /v1 from a browser, e.g. with tokens from
+#   # POST /v1/tokens. Empty allows none.
+#   cors_origins: [https://app.example.com]
 
 providers:
   # Any upstream that speaks Open Responses (OpenAI's Responses API or a

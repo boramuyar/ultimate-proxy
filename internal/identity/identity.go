@@ -6,14 +6,16 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
 )
 
 // How a caller authenticated.
 const (
-	MethodAPIKey = "api_key"
-	MethodJWT    = "jwt"
+	MethodAPIKey     = "api_key"
+	MethodJWT        = "jwt"
+	MethodProxyToken = "proxy_token"
 )
 
 // Identity is who a request is billed to, whatever credential it came with.
@@ -35,6 +37,8 @@ type Identity struct {
 	// AllowedModels limits the models the caller may use; nil allows all.
 	// Entries are model names or provider/model, and may end in *.
 	AllowedModels []string
+	// Expires is when the credential stops working; zero for API keys.
+	Expires time.Time
 	// CanAssertUsers lets the caller name its end user in a header or in
 	// metadata.
 	CanAssertUsers bool

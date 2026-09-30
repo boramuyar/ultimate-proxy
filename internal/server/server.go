@@ -25,6 +25,7 @@ type Server struct {
 	store     store.Store
 	auth      identity.Chain
 	apiKeys   *identity.APIKeys
+	tokens    *identity.ProxyTokens
 	meter     *meter.Meter
 	router    *Router
 	prices    *pricing.Table
@@ -44,6 +45,8 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 	if len(cfg.Auth.JWT) > 0 {
 		s.auth = append(s.auth, identity.NewJWTs(cfg.Auth.JWT, st))
 	}
+	s.tokens = identity.NewProxyTokens(st)
+	s.auth = append(s.auth, s.tokens)
 	s.apiKeys = identity.NewAPIKeys(st)
 	if cfg.Auth.APIKeysEnabled() {
 		s.auth = append(s.auth, s.apiKeys)
@@ -70,6 +73,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/responses", s.handleResponses)
 	mux.HandleFunc("POST /v1/responses/compact", s.handleCompact)
 	mux.HandleFunc("GET /v1/models", s.handleModels)
+	mux.HandleFunc("POST /v1/tokens", s.mintToken)
+	mux.HandleFunc("OPTIONS /v1/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.Handle("GET /metrics", promhttp.HandlerFor(metrics.Registry, promhttp.HandlerOpts{}))
 
@@ -82,13 +87,14 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("GET /admin/applications/{id}/keys", s.listKeys)
 	admin.HandleFunc("POST /admin/applications/{id}/keys", s.createKey)
 	admin.HandleFunc("DELETE /admin/keys/{id}", s.revokeKey)
+	admin.HandleFunc("DELETE /admin/tokens/{id}", s.revokeToken)
 	admin.HandleFunc("GET /admin/usage", s.usage)
 	admin.HandleFunc("GET /admin/insights", s.listInsights)
 	admin.HandleFunc("GET /admin/prices", s.listPrices)
 	admin.HandleFunc("POST /admin/prices", s.addPrice)
 	mux.Handle("/admin/", s.requireAdmin(admin))
 	mux.Handle("/admin/auth/", s.adminAuth.Handler())
-	return mux
+	return s.cors(mux)
 }
 
 // Bootstrap creates the tenants, applications and keys listed in the config.

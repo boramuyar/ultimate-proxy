@@ -161,8 +161,39 @@ neither `claims.models` nor `group_models` is set, every model is allowed.
 With Keycloak, add an *Audience* mapper to the client so its access tokens carry
 `aud: ultimate-proxy`, and a *Group Membership* mapper (with "Full group path" off) for `groups`.
 
-Usage events record how each request authenticated (`auth_method`: `api_key` or `jwt`) and the
-token's `sub` as `subject`.
+Usage events record how each request authenticated (`auth_method`: `api_key`, `jwt` or
+`proxy_token`) and the key ID, the token's `sub`, or the minted token's ID as `subject`.
+
+## Agents on users' machines and in browsers
+
+Code that runs on a user's device should never hold a provider key or a long-lived proxy key. Two
+ways to give it a credential that expires in minutes:
+
+- **The user's own access token.** A desktop or CLI agent signs the user in with your identity
+  provider (authorization code with PKCE, or the device code flow for a CLI) and sends the access
+  token to the proxy, which accepts it as described above.
+- **A token minted by the proxy.** Your backend, holding an API key, or an agent holding the user's
+  access token, asks for a short-lived token and hands it to the client:
+
+  ```sh
+  curl -s localhost:8080/v1/tokens -H "Authorization: Bearer up_…" \
+    -d '{"user":"alice@acme.com","models":["fast"],"expires_in":900}'
+  # {"id":"tok_…","token":"upt_…","expires_at":"…","user":"alice@acme.com","models":["fast"]}
+  ```
+
+  A minted token can only narrow what its minter may do: the same tenant and application, the
+  minter's own user (or, from an API key allowed to name users, the one it names), a subset of its
+  models, and at most `expires_in` seconds (60 to 86400, default 900), never past the minter's own
+  token. The caller cannot change its user, and it cannot mint further tokens. Revoke one early
+  with `DELETE /admin/tokens/<id>`; every proxy stops accepting it within 30 seconds, and the one
+  that handled the call at once. Only a hash of the token is stored.
+
+For pages that call the proxy straight from a browser, list their origins:
+
+```yaml
+auth:
+  cors_origins: [https://app.example.com]   # or "*"; empty (the default) allows none
+```
 
 ## Use it
 

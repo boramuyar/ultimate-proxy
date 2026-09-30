@@ -140,6 +140,45 @@ func (p *Postgres) LookupKey(ctx context.Context, hash string) (*Principal, erro
 	return &pr, err
 }
 
+func (p *Postgres) CreateProxyToken(ctx context.Context, t *ProxyToken, hash string) error {
+	if _, err := p.pool.Exec(ctx, `DELETE FROM proxy_tokens WHERE expires_at < now() - interval '1 day'`); err != nil {
+		return err
+	}
+	t.ID = openresponses.NewID("tok")
+	err := p.pool.QueryRow(ctx, `
+		INSERT INTO proxy_tokens (id, token_hash, app_id, user_email, allowed_models, minted_by, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING created_at`,
+		t.ID, hash, t.AppID, t.UserEmail, t.AllowedModels, t.MintedBy, t.ExpiresAt).Scan(&t.CreatedAt)
+	if isForeignKeyViolation(err) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (p *Postgres) LookupProxyToken(ctx context.Context, hash string) (*ProxyToken, error) {
+	var t ProxyToken
+	err := p.pool.QueryRow(ctx, `
+		SELECT pt.id, t.id, t.name, a.id, a.name, pt.user_email, pt.allowed_models, pt.minted_by, pt.created_at, pt.expires_at
+		FROM proxy_tokens pt JOIN applications a ON a.id = pt.app_id JOIN tenants t ON t.id = a.tenant_id
+		WHERE pt.token_hash = $1 AND pt.revoked_at IS NULL AND pt.expires_at > now()`, hash).
+		Scan(&t.ID, &t.TenantID, &t.TenantName, &t.AppID, &t.AppName, &t.UserEmail, &t.AllowedModels, &t.MintedBy, &t.CreatedAt, &t.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &t, err
+}
+
+func (p *Postgres) RevokeProxyToken(ctx context.Context, id string) error {
+	tag, err := p.pool.Exec(ctx, `UPDATE proxy_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 var usageColumns = []string{
 	"ts", "request_id", "tenant_id", "app_id", "key_id", "user_email", "user_source", "model", "provider",
 	"upstream_model", "stream", "status", "error_code", "http_status", "input_tokens", "cached_input_tokens",

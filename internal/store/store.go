@@ -44,6 +44,24 @@ type Principal struct {
 	CanAssertUsers bool
 }
 
+// ProxyToken is a short-lived token the proxy minted for a client-side
+// agent, narrowed from its minter's identity. Only its hash is stored.
+type ProxyToken struct {
+	ID         string `json:"id"`
+	TenantID   string `json:"tenant_id"`
+	TenantName string `json:"-"`
+	AppID      string `json:"application_id"`
+	AppName    string `json:"-"`
+	UserEmail  string `json:"user,omitempty"`
+	// AllowedModels is nil when the token may use every model its
+	// application may.
+	AllowedModels []string   `json:"models"`
+	MintedBy      string     `json:"minted_by"` // method:subject of the minter
+	CreatedAt     time.Time  `json:"created_at"`
+	ExpiresAt     time.Time  `json:"expires_at"`
+	RevokedAt     *time.Time `json:"revoked_at,omitempty"`
+}
+
 // UsageEvent is one metered request.
 type UsageEvent struct {
 	TS                time.Time
@@ -51,8 +69,8 @@ type UsageEvent struct {
 	TenantID          string
 	AppID             string
 	KeyID             string
-	AuthMethod        string // api_key or jwt
-	Subject           string // the key ID, or the token's sub claim
+	AuthMethod        string // api_key, jwt or proxy_token
+	Subject           string // the key ID, the token's sub claim, or the minted token ID
 	UserEmail         string
 	UserSource        string // jwt, header, metadata, safety_identifier or none
 	Model             string
@@ -177,6 +195,13 @@ type Store interface {
 	ListKeys(ctx context.Context, appID string) ([]APIKey, error)
 	// LookupKey returns ErrNotFound for unknown or revoked keys.
 	LookupKey(ctx context.Context, hash string) (*Principal, error)
+	// CreateProxyToken stores a minted token by hash, filling in its ID and
+	// creation time, and forgets tokens that expired over a day ago.
+	CreateProxyToken(ctx context.Context, t *ProxyToken, hash string) error
+	// LookupProxyToken returns ErrNotFound for unknown, revoked or expired
+	// tokens. TenantName and AppName are filled in.
+	LookupProxyToken(ctx context.Context, hash string) (*ProxyToken, error)
+	RevokeProxyToken(ctx context.Context, id string) error
 	InsertUsage(ctx context.Context, events []UsageEvent) error
 	QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, error)
 	AddPrice(ctx context.Context, p *Price) error
