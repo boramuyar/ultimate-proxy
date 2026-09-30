@@ -55,12 +55,16 @@ func newTestRouter(t *testing.T, yaml string) *testRouter {
 }
 
 func (tr *testRouter) run(t *testing.T, model string, pinned bool) (Outcome, error) {
+	return tr.runPrefer(t, model, pinned, nil)
+}
+
+func (tr *testRouter) runPrefer(t *testing.T, model string, pinned bool, prefer *Deployment) (Outcome, error) {
 	t.Helper()
 	plan, ok := tr.Plan(model)
 	if !ok {
 		t.Fatalf("no plan for %s", model)
 	}
-	_, out, err := tr.Run(context.Background(), plan, pinned, func(a Attempt) (*provider.Result, error) {
+	_, out, err := tr.Run(context.Background(), Request{Plan: plan, Pinned: pinned, Prefer: prefer}, func(a Attempt) (*provider.Result, error) {
 		name := a.Deployment.Provider + "/" + a.Deployment.Name
 		tr.calls = append(tr.calls, name)
 		if q := tr.script[name]; len(q) > 0 {

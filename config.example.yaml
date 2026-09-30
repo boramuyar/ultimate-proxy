@@ -67,6 +67,9 @@ providers:
   #   deployments:
   #     - {name: gpu-1, base_url: http://vllm-1:8000/v1, weight: 2}
   #     - {name: gpu-2, base_url: http://vllm-2:8000/v1}
+  #   # Conversations stick to the replica that has their prefix cached, for
+  #   # this long (default insights.cache_ttl). sticky: false turns it off.
+  #   cache_ttl: 30m
 
 # Client-facing model names. Clients can also send "<provider>/<model>",
 # for example "openai/gpt-5".

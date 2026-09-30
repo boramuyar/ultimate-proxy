@@ -39,6 +39,8 @@ type Deployment struct {
 type Pool struct {
 	Name        string
 	Deployments []*Deployment
+	Sticky      bool
+	CacheTTL    time.Duration
 }
 
 // Target is one model a request may be served by: the requested one or a
@@ -66,13 +68,14 @@ type Router struct {
 	log    *slog.Logger
 	now    func() time.Time
 	sleep  func(ctx context.Context, d time.Duration) error
+	aff    affinity
 }
 
 func New(cfg *config.Config, log *slog.Logger) (*Router, error) {
 	client := provider.NewHTTPClient(cfg.ResponseHeaderTimeout)
-	r := &Router{pools: map[string]*Pool{}, models: map[string]model{}, opts: cfg.Routing, log: log, now: time.Now, sleep: sleepCtx}
+	r := &Router{pools: map[string]*Pool{}, models: map[string]model{}, opts: cfg.Routing, log: log, now: time.Now, sleep: sleepCtx, aff: affinity{m: map[string]sticky{}}}
 	for _, p := range cfg.Providers {
-		pool := &Pool{Name: p.Name}
+		pool := &Pool{Name: p.Name, Sticky: p.IsSticky(), CacheTTL: p.CacheTTL}
 		for _, d := range p.Deployments {
 			var a provider.Provider
 			switch p.Type {
@@ -145,14 +148,27 @@ type Outcome struct {
 	Attempts int
 }
 
+// Request says where a request may go.
+type Request struct {
+	// Plan is the requested model's target, then its fallbacks.
+	Plan []Target
+	// Pinned keeps the request on the first target, for requests whose
+	// state lives with the upstream account (previous_response_id,
+	// encrypted reasoning).
+	Pinned bool
+	// Prefer is the deployment the session last used, tried first while it
+	// is healthy.
+	Prefer *Deployment
+}
+
 // Run calls try for each attempt until one does not fail with a retryable
-// *provider.Failure, or MaxAttempts is reached. The order is: a weighted
-// pick among the first target's healthy deployments, its other healthy
-// deployments, then each fallback target the same way. With pinned, only the
-// first target is used, for requests whose state lives with the upstream
-// account (previous_response_id, encrypted reasoning).
-func (r *Router) Run(ctx context.Context, plan []Target, pinned bool, try func(Attempt) (*provider.Result, error)) (*provider.Result, Outcome, error) {
-	if pinned {
+// *provider.Failure, or MaxAttempts is reached. The order is: the preferred
+// deployment, or a weighted pick among the first target's healthy
+// deployments; its other healthy deployments; then each fallback target the
+// same way.
+func (r *Router) Run(ctx context.Context, req Request, try func(Attempt) (*provider.Result, error)) (*provider.Result, Outcome, error) {
+	plan := req.Plan
+	if req.Pinned {
 		plan = plan[:1]
 	}
 	type key struct {
@@ -173,7 +189,10 @@ func (r *Router) Run(ctx context.Context, plan []Target, pinned bool, try func(A
 			idx int
 		)
 		now := r.now()
-		for ; ti < len(plan); ti++ {
+		if p := req.Prefer; out.Attempts == 0 && p != nil && p.Provider == plan[0].Pool.Name && p.usable(now) {
+			a = Attempt{plan[0], p}
+		}
+		for ; a.Deployment == nil && ti < len(plan); ti++ {
 			var avail []*Deployment
 			for _, d := range plan[ti].Pool.Deployments {
 				if !tried[key{ti, d}] && d.usable(now) {

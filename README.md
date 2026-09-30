@@ -273,6 +273,15 @@ log records the provider, upstream model and `deployment` that served each reque
 Metrics: `ultimate_proxy_upstream_attempts_total`, `ultimate_proxy_fallbacks_total` and
 `ultimate_proxy_breaker_open`.
 
+**Stickiness.** Prompt caches are per deployment: per vLLM or llama.cpp replica, per OpenAI project.
+So when a provider has several deployments, each conversation keeps going to the one that served its
+last turn, for the provider's `cache_ttl` (default `insights.cache_ttl`, 5 minutes; longer suits
+vLLM). A conversation is, first match wins within an application and model: the
+`X-Proxy-Session-Id` header, `prompt_cache_key`, or the instructions and input up to the first user
+message. A request with `previous_response_id` goes to the deployment that produced that response.
+If the sticky deployment is resting or its breaker is open, the conversation moves once and sticks
+to the new one. `sticky: false` on a provider turns it off. The session map is per process for now.
+
 ## Prices
 
 Prices are rows in the `model_prices` table, in USD per million tokens. They are never edited: when a
@@ -310,6 +319,7 @@ hashes are kept) and compares it with what the same application sent recently. E
 | `miss_new_prefix` | Nothing similar was sent recently; a normal first request. |
 | `miss_too_short` | The prompt is below the provider's minimum cacheable size. |
 | `unknown` | The request uses `previous_response_id`, so the proxy can't see the prompt. |
+| `rerouted` | The deployment that had the conversation cached was unavailable, so it moved (see below). |
 
 `/admin/usage?group_by=application,cache` shows the mix per application. Every minute, rules look at
 the last `window` of traffic per application and model and open an insight when a rate crosses its

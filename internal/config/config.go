@@ -177,7 +177,17 @@ type Provider struct {
 	// inherits base_url, api_key and headers from the provider unless it sets
 	// its own. Without any, the provider is a single deployment named after it.
 	Deployments []Deployment `yaml:"deployments"`
+	// Sticky keeps each conversation on the deployment that served its last
+	// turn while that deployment's prompt cache is likely warm. Default on;
+	// it only matters with several deployments.
+	Sticky *bool `yaml:"sticky"`
+	// CacheTTL is how long the upstream keeps a prompt prefix cached, and so
+	// how long a conversation sticks. Default insights.cache_ttl.
+	CacheTTL time.Duration `yaml:"cache_ttl"`
 }
+
+// IsSticky reports whether conversations stick to a deployment.
+func (p *Provider) IsSticky() bool { return p.Sticky == nil || *p.Sticky }
 
 type Deployment struct {
 	Name    string            `yaml:"name"`
@@ -348,6 +358,11 @@ func (c *Config) applyDefaults() {
 	in := &c.Insights
 	if in.CacheTTL == 0 {
 		in.CacheTTL = 5 * time.Minute
+	}
+	for i := range c.Providers {
+		if c.Providers[i].CacheTTL == 0 {
+			c.Providers[i].CacheTTL = in.CacheTTL
+		}
 	}
 	if in.MinCacheableTokens == 0 {
 		in.MinCacheableTokens = 1024

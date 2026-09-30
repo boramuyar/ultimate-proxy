@@ -27,8 +27,17 @@ admin:
 
 providers:
   # Free: a deterministic fake of the Responses API, running next to the proxy.
+  # Two replicas, so the demo shows conversations sticking to one and
+  # moving when it fails.
   - name: fake-openai
     type: openai
+    api_key: fake-key
+    deployments:
+      - {name: replica-1, base_url: http://fake-upstream:9090/v1}
+      - {name: replica-2, base_url: http://fake-upstream-2:9090/v1}
+  # The same fake, spoken to through Chat Completions, as for vLLM or Ollama.
+  - name: fake-local
+    type: chat_completions
     base_url: http://fake-upstream:9090/v1
     api_key: fake-key
   # Real provider. Calls to it fail until OPENAI_API_KEY is set in .env.
@@ -38,7 +47,8 @@ providers:
     api_key: "${OPENAI_API_KEY}"
 
 models:
-  - {name: fake-gpt, provider: fake-openai, upstream_model: gpt-fake}
+  - {name: fake-gpt, provider: fake-openai, upstream_model: gpt-fake, fallbacks: [fake-chat]}
+  - {name: fake-chat, provider: fake-local, upstream_model: llama-fake}
   - {name: smart, provider: openai, upstream_model: gpt-5}
   - {name: fast, provider: openai, upstream_model: gpt-5-mini}
 

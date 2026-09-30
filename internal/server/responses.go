@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/go-json-experiment/json/jsontext"
 
 	"github.com/boramuyar/ultimate-proxy/internal/identity"
 	"github.com/boramuyar/ultimate-proxy/internal/insights"
@@ -101,11 +104,36 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 
 	// Retries happen only before anything reaches the client: adapters
 	// report a *provider.Failure only when they sent no event.
-	res, out, err := s.router.Run(ctx, plan, pinnedToUpstream(req), func(a routing.Attempt) (*provider.Result, error) {
+	// Send the conversation where its prompt prefix is cached: the
+	// deployment that produced previous_response_id, or that served the
+	// session last.
+	var (
+		session string
+		prefer  *routing.Deployment
+	)
+	if primary.Spread() {
+		if req.PreviousResponseID != nil && *req.PreviousResponseID != "" {
+			prefer = s.router.Sticky(responseKey(*req.PreviousResponseID))
+		} else if session = sessionKey(id.AppID, req.Model, r, req); session != "" {
+			prefer = s.router.Sticky(session)
+		}
+	}
+	res, out, err := s.router.Run(ctx, routing.Request{Plan: plan, Pinned: pinnedToUpstream(req), Prefer: prefer}, func(a routing.Attempt) (*provider.Result, error) {
 		call.UpstreamModel = a.Target.UpstreamModel
 		return a.Deployment.Adapter.Create(ctx, call, sink)
 	})
 	served := out.Target
+	rerouted := prefer != nil && out.Deployment != prefer
+	if err == nil && served.Spread() {
+		if session != "" {
+			s.router.Stick(session, out.Deployment, false)
+		}
+		// Responses stored upstream can only be continued where they were
+		// made, whatever the stickiness setting.
+		if rid := responseID(res.Response); rid != "" {
+			s.router.Stick(responseKey(rid), out.Deployment, true)
+		}
+	}
 	// Price what actually served the request.
 	priceModel := req.Model
 	if served != primary {
@@ -184,6 +212,10 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	// The cache scope is the requested model's; a fallback has its own cache.
 	if fp != nil && ev.UsageReported && ev.Status != "failed" && served == primary {
 		ev.CacheStatus, ev.ExpectedCachedTokens = s.insights.Tracker.Classify(fp, exp, ev.InputTokens, ev.CachedInputTokens)
+		if rerouted && ev.CacheStatus != insights.CacheHit {
+			// The deployment that had it cached was unavailable.
+			ev.CacheStatus, ev.ExpectedCachedTokens = insights.CacheRerouted, 0
+		}
 		s.insights.Tracker.After(cacheScope, fp, time.Now())
 		if ev.CacheStatus == insights.CacheUnexpectedMiss && priced {
 			missedCost = float64(ev.ExpectedCachedTokens) * s.prices.SavingsPerCachedToken(start, priceModel, ev.Provider, ev.UpstreamModel)
@@ -310,4 +342,75 @@ func pinnedToUpstream(req *openresponses.Envelope) bool {
 		}
 	}
 	return false
+}
+
+// SessionHeader lets a client name its conversation, so its turns stick to
+// one deployment.
+const SessionHeader = "X-Proxy-Session-Id"
+
+// sessionKey identifies the conversation a request continues, per
+// application and model: the X-Proxy-Session-Id header, prompt_cache_key,
+// or else a hash of the instructions and the input up to the first user
+// message, which every later turn repeats. A bare string input is a single
+// turn, so it has none.
+func sessionKey(appID, model string, r *http.Request, req *openresponses.Envelope) string {
+	base := appID + "\x00" + model + "\x00"
+	if v := r.Header.Get(SessionHeader); v != "" {
+		return base + "h\x00" + v
+	}
+	if req.PromptCacheKey != nil && *req.PromptCacheKey != "" {
+		return base + "k\x00" + *req.PromptCacheKey
+	}
+	if len(req.InputItems) == 0 {
+		return ""
+	}
+	h := sha256.New()
+	h.Write(req.Instructions)
+	for _, it := range req.InputItems {
+		h.Write([]byte{0})
+		h.Write(it)
+		if itemRole(it) == "user" {
+			break
+		}
+	}
+	return base + "c\x00" + string(h.Sum(nil))
+}
+
+func responseKey(id string) string { return "resp\x00" + id }
+
+// responseID reads the id of a final response.
+func responseID(raw json.RawMessage) string {
+	var r struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &r) != nil {
+		return ""
+	}
+	return r.ID
+}
+
+// itemRole reads an input item's role without decoding its content.
+func itemRole(item []byte) string {
+	d := jsontext.NewDecoder(bytes.NewReader(item))
+	if tok, err := d.ReadToken(); err != nil || tok.Kind() != '{' {
+		return ""
+	}
+	for d.PeekKind() == '"' {
+		key, err := d.ReadToken()
+		if err != nil {
+			return ""
+		}
+		if key.String() != "role" {
+			if d.SkipValue() != nil {
+				return ""
+			}
+			continue
+		}
+		v, err := d.ReadToken()
+		if err != nil || v.Kind() != '"' {
+			return ""
+		}
+		return v.String()
+	}
+	return ""
 }
