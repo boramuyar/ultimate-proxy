@@ -56,12 +56,20 @@ dashboard on http://localhost:5173, which forwards `/admin` to `localhost:8080`.
 | Data | Store |
 | --- | --- |
 | Tenants, applications, API keys, prices, insights | Postgres (`database_url`) |
-| Request log: one usage event per request, and every `/admin/usage` query | ClickHouse (`clickhouse_url`) |
+| Request log: one usage event per request (90 days by default) and hourly totals (forever), behind every `/admin/usage` query | ClickHouse (`clickhouse_url`) |
 
-ClickHouse is optional: leave `clickhouse_url` empty and usage events go to Postgres as before. To move
-events already in Postgres into ClickHouse, run this once in ClickHouse (for example with
-`docker compose exec clickhouse clickhouse-client -u proxy --password clickhouse -d proxy`); the two
-`usage_events` tables have the same columns in the same order:
+In ClickHouse, each request's raw event is kept for `usage.retention_days` (default 90; 0 keeps them
+forever) and then deleted. Every insert also adds to an hourly rollup (`usage_hourly`: requests, tokens
+and cost per hour, tenant, application, email, model, provider and cache status), which is kept forever.
+`/admin/usage` reads whole hours from the rollup and the partial hours at the ends of the range from raw
+events, so results are exact while raw events exist, long ranges stay fast, and ranges older than the
+retention still work (to the hour).
+
+ClickHouse is optional: leave `clickhouse_url` empty and usage events go to Postgres as before, kept
+forever with no rollup. To move events already in Postgres into ClickHouse, run this once in ClickHouse
+(for example with `docker compose exec clickhouse clickhouse-client -u proxy --password clickhouse -d proxy`);
+the two `usage_events` tables have the same columns in the same order. Events older than the retention
+go into the hourly rollup only.
 
 ```sql
 INSERT INTO usage_events

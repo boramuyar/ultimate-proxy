@@ -81,3 +81,6 @@ usage:
   queue_size: 100000
   batch_size: 1000
   flush_interval: 250ms
+  # With ClickHouse: days to keep each request's raw event. Hourly totals
+  # are kept forever. 0 keeps raw events forever.
+  retention_days: 90

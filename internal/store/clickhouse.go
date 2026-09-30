@@ -42,6 +42,11 @@ func (s *splitStore) Close() {
 }
 
 // ClickHouse keeps usage events in ClickHouse, through its HTTP interface.
+//
+// Raw events (usage_events) expire after a retention period. Every insert
+// also adds to an hourly rollup (usage_hourly) that is kept forever, and
+// queries read whole hours from the rollup and only the partial hours at the
+// edges of the range from the raw events.
 type ClickHouse struct {
 	endpoint string // scheme://host:port/
 	db       string
@@ -82,9 +87,50 @@ CREATE TABLE IF NOT EXISTS usage_events (
 PARTITION BY toYYYYMM(ts)
 ORDER BY (toDate(ts), tenant_id, app_id, ts)`
 
-// NewClickHouse connects to a URL like http://user:password@host:8123/database
-// and creates the database and table if they are missing.
-func NewClickHouse(ctx context.Context, rawURL string) (*ClickHouse, error) {
+// The hourly rollup has one row per hour and combination of the dimensions
+// usage can be grouped by. Background merges add rows with the same key
+// together, but not right away, so queries still sum.
+const clickhouseRollupSchema = `
+CREATE TABLE IF NOT EXISTS usage_hourly (
+    hour                DateTime('UTC'),
+    tenant_id           LowCardinality(String),
+    app_id              LowCardinality(String),
+    user_email          String,
+    model               LowCardinality(String),
+    provider            LowCardinality(String),
+    cache_status        LowCardinality(String),
+    requests            UInt64,
+    failed_requests     UInt64,
+    input_tokens        Int64,
+    cached_input_tokens Int64,
+    cache_write_tokens  Int64,
+    output_tokens       Int64,
+    reasoning_tokens    Int64,
+    cost_usd            Float64
+) ENGINE = SummingMergeTree
+PARTITION BY toYYYYMM(hour)
+ORDER BY (hour, tenant_id, app_id, user_email, model, provider, cache_status)`
+
+// The materialized view fills the rollup on every insert into usage_events.
+const clickhouseRollupView = `
+CREATE MATERIALIZED VIEW IF NOT EXISTS usage_hourly_mv TO usage_hourly AS
+SELECT
+    toStartOfHour(ts) AS hour, tenant_id, app_id, user_email, model, provider, cache_status,
+    count() AS requests,
+    countIf(status = 'failed') AS failed_requests,
+    sum(toInt64(input_tokens)) AS input_tokens,
+    sum(toInt64(cached_input_tokens)) AS cached_input_tokens,
+    sum(toInt64(cache_write_tokens)) AS cache_write_tokens,
+    sum(toInt64(output_tokens)) AS output_tokens,
+    sum(toInt64(reasoning_tokens)) AS reasoning_tokens,
+    sum(cost_usd) AS cost_usd
+FROM usage_events
+GROUP BY hour, tenant_id, app_id, user_email, model, provider, cache_status`
+
+// NewClickHouse connects to a URL like http://user:password@host:8123/database,
+// creates the database and tables if they are missing, and sets raw events to
+// expire after retentionDays (0 keeps them forever).
+func NewClickHouse(ctx context.Context, rawURL string, retentionDays int) (*ClickHouse, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("clickhouse_url must look like http://user:password@host:8123/database")
@@ -104,10 +150,40 @@ func NewClickHouse(ctx context.Context, rawURL string) (*ClickHouse, error) {
 	if err := c.exec(ctx, "CREATE DATABASE IF NOT EXISTS "+quoteIdent(c.db), nil, ""); err != nil {
 		return nil, fmt.Errorf("connect to clickhouse: %w", err)
 	}
-	if err := c.exec(ctx, clickhouseSchema, nil, c.db); err != nil {
-		return nil, fmt.Errorf("apply clickhouse schema: %w", err)
+	for _, stmt := range []string{clickhouseSchema, clickhouseRollupSchema, clickhouseRollupView} {
+		if err := c.exec(ctx, stmt, nil, c.db); err != nil {
+			return nil, fmt.Errorf("apply clickhouse schema: %w", err)
+		}
+	}
+	if err := c.setRetention(ctx, retentionDays); err != nil {
+		return nil, fmt.Errorf("set clickhouse retention: %w", err)
 	}
 	return c, nil
+}
+
+// setRetention changes the raw events' TTL only when it differs from the
+// configured one, because changing it rewrites the table's existing data.
+func (c *ClickHouse) setRetention(ctx context.Context, days int) error {
+	if days < 0 {
+		return fmt.Errorf("retention must be 0 (forever) or a number of days")
+	}
+	rc, err := c.do(ctx, "SELECT create_table_query FROM system.tables WHERE database = {db:String} AND name = 'usage_events'",
+		url.Values{"param_db": {c.db}}, "", nil)
+	if err != nil {
+		return err
+	}
+	current, err := io.ReadAll(rc)
+	rc.Close()
+	if err != nil {
+		return err
+	}
+	switch {
+	case days == 0 && strings.Contains(string(current), " TTL "):
+		return c.exec(ctx, "ALTER TABLE usage_events REMOVE TTL", nil, c.db)
+	case days > 0 && !strings.Contains(string(current), fmt.Sprintf(" TTL toDateTime(ts) + toIntervalDay(%d) ", days)):
+		return c.exec(ctx, fmt.Sprintf("ALTER TABLE usage_events MODIFY TTL toDateTime(ts) + INTERVAL %d DAY", days), nil, c.db)
+	}
+	return nil
 }
 
 func (c *ClickHouse) Close() { c.client.CloseIdleConnections() }
@@ -217,21 +293,53 @@ func (c *ClickHouse) InsertUsage(ctx context.Context, events []UsageEvent) error
 }
 
 func (c *ClickHouse) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, error) {
-	var (
-		sel, group []string
-		params     = url.Values{
-			"param_from": {q.From.UTC().Format("2006-01-02 15:04:05.000")},
-			"param_to":   {q.To.UTC().Format("2006-01-02 15:04:05.000")},
-			// Return counts and sums as JSON numbers, not strings.
-			"output_format_json_quote_64bit_integers": {"0"},
-		}
-		where = []string{"ts >= {from:DateTime64(3, 'UTC')}", "ts < {to:DateTime64(3, 'UTC')}"}
-	)
+	const format = "2006-01-02 15:04:05.000"
+	// Whole hours in [from, to) come from the rollup, the partial hours at
+	// either end from the raw events. Once raw events expire, the edges of an
+	// old range are simply missing, which is at most an hour on each side.
+	firstHour := q.From.UTC().Truncate(time.Hour)
+	if firstHour.Before(q.From) {
+		firstHour = firstHour.Add(time.Hour)
+	}
+	lastHour := q.To.UTC().Truncate(time.Hour)
+	if !firstHour.Before(lastHour) {
+		firstHour, lastHour = q.To, q.To // no whole hour: all raw
+	}
+	params := url.Values{
+		"param_from":  {q.From.UTC().Format(format)},
+		"param_to":    {q.To.UTC().Format(format)},
+		"param_first": {firstHour.UTC().Format(format)},
+		"param_last":  {lastHour.UTC().Format(format)},
+		// Return counts and sums as JSON numbers, not strings.
+		"output_format_json_quote_64bit_integers": {"0"},
+	}
+	var filters []string
+	i := 0
+	for k, v := range q.Filters {
+		name := fmt.Sprintf("f%d", i)
+		i++
+		params.Set("param_"+name, v)
+		filters = append(filters, fmt.Sprintf(" AND %s = {%s:String}", UsageDimensions[k], name))
+	}
+	filter := strings.Join(filters, "")
+	dims := "tenant_id, app_id, user_email, model, provider, cache_status"
+	source := `SELECT toDateTime64(hour, 3, 'UTC') AS t, ` + dims + `, requests, failed_requests, input_tokens,
+		cached_input_tokens, cache_write_tokens, output_tokens, reasoning_tokens, cost_usd
+	FROM usage_hourly
+	WHERE hour >= {first:DateTime64(3, 'UTC')} AND hour < {last:DateTime64(3, 'UTC')}` + filter + `
+	UNION ALL
+	SELECT ts AS t, ` + dims + `, toUInt64(1), toUInt64(status = 'failed'), toInt64(input_tokens),
+		toInt64(cached_input_tokens), toInt64(cache_write_tokens), toInt64(output_tokens), toInt64(reasoning_tokens), cost_usd
+	FROM usage_events
+	WHERE ((ts >= {from:DateTime64(3, 'UTC')} AND ts < {first:DateTime64(3, 'UTC')})
+	    OR (ts >= {last:DateTime64(3, 'UTC')} AND ts < {to:DateTime64(3, 'UTC')}))` + filter
+
+	var sel, group []string
 	switch q.Granularity {
 	case "hour":
-		sel = append(sel, "toUnixTimestamp(toStartOfHour(ts))")
+		sel = append(sel, "toUnixTimestamp(toStartOfHour(t))")
 	case "day":
-		sel = append(sel, "toUnixTimestamp(toStartOfDay(ts))")
+		sel = append(sel, "toUnixTimestamp(toStartOfDay(t))")
 	}
 	if q.Granularity != "" {
 		group = append(group, "1")
@@ -240,19 +348,10 @@ func (c *ClickHouse) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, 
 		sel = append(sel, "toString("+UsageDimensions[g]+")")
 		group = append(group, fmt.Sprint(len(sel)))
 	}
-	i := 0
-	for k, v := range q.Filters {
-		name := fmt.Sprintf("f%d", i)
-		i++
-		params.Set("param_"+name, v)
-		where = append(where, fmt.Sprintf("%s = {%s:String}", UsageDimensions[k], name))
-	}
 	sel = append(sel,
-		"count()", "countIf(status = 'failed')",
-		"sum(toInt64(input_tokens))", "sum(toInt64(cached_input_tokens))",
-		"sum(toInt64(cache_write_tokens))", "sum(toInt64(output_tokens))",
-		"sum(toInt64(reasoning_tokens))", "sum(cost_usd)")
-	sql := "SELECT " + strings.Join(sel, ", ") + " FROM usage_events WHERE " + strings.Join(where, " AND ")
+		"sum(requests)", "sum(failed_requests)", "sum(input_tokens)", "sum(cached_input_tokens)",
+		"sum(cache_write_tokens)", "sum(output_tokens)", "sum(reasoning_tokens)", "sum(cost_usd)")
+	sql := "SELECT " + strings.Join(sel, ", ") + " FROM (" + source + ")"
 	if len(group) > 0 {
 		sql += " GROUP BY " + strings.Join(group, ", ")
 	}
