@@ -132,7 +132,7 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) {
 		s.adminError(w, err)
 		return
 	}
-	s.auth.ForgetAll()
+	s.apiKeys.ForgetAll()
 	w.WriteHeader(http.StatusNoContent)
 }
 
