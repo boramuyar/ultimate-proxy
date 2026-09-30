@@ -222,3 +222,13 @@ func (e *Envelope) UpstreamBody(model string) []byte {
 	}
 	return append(out, e.body[i:]...)
 }
+
+// Request decodes the whole body, for adapters that translate the request
+// rather than pass it through.
+func (e *Envelope) Request() (*Request, *APIError) {
+	var r Request
+	if err := json.Unmarshal(e.body, &r); err != nil {
+		return nil, InvalidRequest("invalid_type", err.Error(), "")
+	}
+	return &r, nil
+}

@@ -8,7 +8,13 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
 ## What works today (phases 1 and 2)
 
 - `POST /v1/responses`: JSON and SSE streaming, passing the Open Responses HTTP compliance tests.
-- Upstreams: any provider that speaks Open Responses (OpenAI's Responses API and compatible servers).
+- Upstreams: any provider that speaks Open Responses (OpenAI's Responses API and compatible servers),
+  relayed untouched, and any server that only speaks Chat Completions (vLLM, Ollama, llama.cpp,
+  LiteLLM, Groq, Together, OpenRouter and others), translated with provider `type: chat_completions`.
+  Translation covers text, images, files as data, function tools and `tool_choice`, structured
+  output (`text.format`), reasoning effort and streamed reasoning, and cached-token usage. It
+  rejects with a 400 what Chat Completions cannot express: `previous_response_id`, hosted tools and
+  item references. The output limit is sent as `max_tokens`, which every such server accepts.
   Requests and events are relayed as-is; the proxy only reads the final usage.
 - Callers authenticate with the proxy's own API keys (one per application and tenant), with access
   tokens from your own identity provider (see "Using your own identity provider"), or both.

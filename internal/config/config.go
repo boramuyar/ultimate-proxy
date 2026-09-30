@@ -164,8 +164,11 @@ type OIDC struct {
 func (o *OIDC) Enabled() bool { return o.Issuer != "" }
 
 type Provider struct {
-	Name    string            `yaml:"name"`
-	Type    string            `yaml:"type"` // openai
+	Name string `yaml:"name"`
+	// Type is the API the upstream speaks: openai (the Responses API, passed
+	// through untouched) or chat_completions (translated, for vLLM, Ollama and
+	// other OpenAI-compatible servers).
+	Type    string            `yaml:"type"`
 	BaseURL string            `yaml:"base_url"`
 	APIKey  string            `yaml:"api_key"`
 	Headers map[string]string `yaml:"headers"`
@@ -358,9 +361,9 @@ func (c *Config) validate() error {
 		}
 		names[p.Name] = true
 		switch p.Type {
-		case "openai":
+		case "openai", "chat_completions":
 		default:
-			return fmt.Errorf("provider %q: unknown type %q (want openai)", p.Name, p.Type)
+			return fmt.Errorf("provider %q: unknown type %q (want openai or chat_completions)", p.Name, p.Type)
 		}
 	}
 	for _, m := range c.Models {

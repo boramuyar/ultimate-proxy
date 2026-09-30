@@ -55,6 +55,13 @@ providers:
     type: openai
     base_url: https://api.openai.com/v1
     api_key: "${OPENAI_API_KEY}"
+  # Any OpenAI-compatible server that only has Chat Completions (vLLM, Ollama,
+  # llama.cpp, LiteLLM, Groq, Together, OpenRouter...). Clients still use
+  # /v1/responses; the proxy translates requests and streams.
+  # - name: local
+  #   type: chat_completions
+  #   base_url: http://vllm:8000/v1
+  #   api_key: "${VLLM_API_KEY}"
 
 # Client-facing model names. Clients can also send "<provider>/<model>",
 # for example "openai/gpt-5".
