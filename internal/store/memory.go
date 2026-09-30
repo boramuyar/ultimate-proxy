@@ -16,14 +16,15 @@ type Memory struct {
 	mu       sync.RWMutex
 	tenants  map[string]*Tenant
 	apps     map[string]*Application
-	keys     map[string]*APIKey // by hash
+	keys     map[string]*APIKey     // by hash
+	tokens   map[string]*ProxyToken // by hash
 	events   []UsageEvent
 	insights map[string]Insight
 	prices   []Price
 }
 
 func NewMemory() *Memory {
-	return &Memory{tenants: map[string]*Tenant{}, apps: map[string]*Application{}, keys: map[string]*APIKey{}, insights: map[string]Insight{}}
+	return &Memory{tenants: map[string]*Tenant{}, apps: map[string]*Application{}, keys: map[string]*APIKey{}, tokens: map[string]*ProxyToken{}, insights: map[string]Insight{}}
 }
 
 func (m *Memory) Close() {}
@@ -137,6 +138,54 @@ func (m *Memory) LookupKey(_ context.Context, hash string) (*Principal, error) {
 	a := m.apps[k.AppID]
 	t := m.tenants[a.TenantID]
 	return &Principal{KeyID: k.ID, TenantID: t.ID, TenantName: t.Name, AppID: a.ID, AppName: a.Name, CanAssertUsers: a.CanAssertUsers}, nil
+}
+
+func (m *Memory) CreateProxyToken(_ context.Context, t *ProxyToken, hash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.apps[t.AppID]; !ok {
+		return ErrNotFound
+	}
+	now := time.Now().UTC()
+	for h, old := range m.tokens {
+		if old.ExpiresAt.Before(now.Add(-24 * time.Hour)) {
+			delete(m.tokens, h)
+		}
+	}
+	t.ID, t.CreatedAt = openresponses.NewID("tok"), now
+	c := *t
+	c.AllowedModels = append([]string(nil), t.AllowedModels...)
+	if t.AllowedModels == nil {
+		c.AllowedModels = nil
+	}
+	m.tokens[hash] = &c
+	return nil
+}
+
+func (m *Memory) LookupProxyToken(_ context.Context, hash string) (*ProxyToken, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	t, ok := m.tokens[hash]
+	if !ok || t.RevokedAt != nil || !time.Now().Before(t.ExpiresAt) {
+		return nil, ErrNotFound
+	}
+	c := *t
+	a := m.apps[t.AppID]
+	c.TenantID, c.TenantName, c.AppName = a.TenantID, m.tenants[a.TenantID].Name, a.Name
+	return &c, nil
+}
+
+func (m *Memory) RevokeProxyToken(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tokens {
+		if t.ID == id && t.RevokedAt == nil {
+			now := time.Now().UTC()
+			t.RevokedAt = &now
+			return nil
+		}
+	}
+	return ErrNotFound
 }
 
 func (m *Memory) InsertUsage(_ context.Context, events []UsageEvent) error {

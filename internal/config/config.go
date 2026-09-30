@@ -93,6 +93,10 @@ type Auth struct {
 	// APIKeys turns the proxy's own keys on or off. Unset means on.
 	APIKeys *bool       `yaml:"api_keys"`
 	JWT     []JWTIssuer `yaml:"jwt"`
+	// CORSOrigins are the web origins whose pages may call /v1 from a
+	// browser, such as https://app.example.com, or "*" for any. Empty
+	// allows none.
+	CORSOrigins []string `yaml:"cors_origins"`
 }
 
 // APIKeysEnabled reports whether the proxy's own API keys are accepted.
@@ -250,6 +254,7 @@ func (c *Config) applyDefaults() {
 	if o.DisplayName == "" {
 		o.DisplayName = "SSO"
 	}
+	c.Auth.CORSOrigins = splitList(c.Auth.CORSOrigins, false)
 	for i := range c.Auth.JWT {
 		j := &c.Auth.JWT[i]
 		if j.Claims.User == "" {

@@ -129,6 +129,7 @@ func (j *JWTs) Authenticate(ctx context.Context, token string) (*Identity, *open
 	if apiErr != nil {
 		return nil, apiErr
 	}
+	id.Expires = tok.Expiry
 
 	expires := tok.Expiry
 	if limit := now.Add(jwtCacheTTL); expires.IsZero() || expires.After(limit) {

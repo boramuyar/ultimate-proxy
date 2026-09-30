@@ -23,7 +23,7 @@ func stores(t *testing.T) map[string]Store {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pg.pool.Exec(context.Background(), "TRUNCATE usage_events, insights, model_prices, api_keys, applications, tenants"); err != nil {
+		if _, err := pg.pool.Exec(context.Background(), "TRUNCATE usage_events, insights, model_prices, proxy_tokens, api_keys, applications, tenants"); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(pg.Close)
@@ -259,5 +259,51 @@ func TestClickHouseRetention(t *testing.T) {
 			t.Fatalf("retention %d days: table is %s", c.days, got)
 		}
 		ch.Close()
+	}
+}
+
+func TestProxyTokens(t *testing.T) {
+	for name, st := range stores(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			ten, _ := st.EnsureTenant(ctx, "tok-tenant")
+			app, _ := st.EnsureApplication(ctx, ten.ID, "agent", false)
+			if err := st.CreateProxyToken(ctx, &ProxyToken{AppID: "app_missing", ExpiresAt: time.Now().Add(time.Hour)}, "h0"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("missing app: got %v", err)
+			}
+
+			all := &ProxyToken{AppID: app.ID, UserEmail: "ada@example.com", MintedBy: "api_key:key_1", ExpiresAt: time.Now().Add(time.Hour)}
+			some := &ProxyToken{AppID: app.ID, AllowedModels: []string{"smart", "openai/*"}, MintedBy: "jwt:u", ExpiresAt: time.Now().Add(time.Hour)}
+			old := &ProxyToken{AppID: app.ID, MintedBy: "jwt:u", ExpiresAt: time.Now().Add(-time.Minute)}
+			for h, tok := range map[string]*ProxyToken{"h1": all, "h2": some, "h3": old} {
+				if err := st.CreateProxyToken(ctx, tok, h); err != nil || tok.ID == "" {
+					t.Fatalf("create: %v, id %q", err, tok.ID)
+				}
+			}
+
+			got, err := st.LookupProxyToken(ctx, "h1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ID != all.ID || got.TenantID != ten.ID || got.TenantName != "tok-tenant" || got.AppName != "agent" ||
+				got.UserEmail != "ada@example.com" || got.AllowedModels != nil || got.MintedBy != "api_key:key_1" {
+				t.Errorf("unexpected token %+v", got)
+			}
+			if got, _ := st.LookupProxyToken(ctx, "h2"); got == nil || len(got.AllowedModels) != 2 || got.AllowedModels[1] != "openai/*" {
+				t.Errorf("allowed models not kept: %+v", got)
+			}
+			if _, err := st.LookupProxyToken(ctx, "h3"); !errors.Is(err, ErrNotFound) {
+				t.Errorf("expired token: got %v", err)
+			}
+			if err := st.RevokeProxyToken(ctx, all.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.LookupProxyToken(ctx, "h1"); !errors.Is(err, ErrNotFound) {
+				t.Errorf("revoked token: got %v", err)
+			}
+			if err := st.RevokeProxyToken(ctx, all.ID); !errors.Is(err, ErrNotFound) {
+				t.Errorf("second revoke: got %v", err)
+			}
+		})
 	}
 }
