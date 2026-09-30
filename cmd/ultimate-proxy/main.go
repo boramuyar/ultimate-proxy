@@ -83,6 +83,10 @@ func run(configPath string, log *slog.Logger) error {
 	if err := srv.Limits().Reload(ctx); err != nil {
 		return err
 	}
+	// Budget counters start from the usage log, then stay fresh with Run.
+	if err := srv.Limits().Rebuild(ctx); err != nil {
+		log.Warn("counting budget use so far failed; budgets start from zero until the next hourly rebuild", "err", err)
+	}
 	go srv.Limits().Run(ctx, cfg.Limits.ReloadInterval)
 	if cfg.RedisURL == "" {
 		log.Info("rate limit counters are per process; set redis_url when running more than one replica")

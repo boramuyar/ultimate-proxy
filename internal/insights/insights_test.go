@@ -139,3 +139,40 @@ func TestEngineHysteresis(t *testing.T) {
 		t.Fatalf("stored %+v", all)
 	}
 }
+
+func TestBudgetInsight(t *testing.T) {
+	st := store.NewMemory()
+	rec := &recorder{}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	e := NewEngine(config.Insights{Window: 10 * time.Minute}, st, rec, quiet)
+	ctx := context.Background()
+	resets := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	rule := store.Limit{ID: "lim_1", TenantID: "t", User: "*", Kind: store.LimitBudgetUSD, Amount: 10, Period: "day", Enforcement: "hard"}
+	alert := func(used float64) {
+		e.Budget(ctx, BudgetAlert{Rule: rule, User: "ann@x.com", Used: used, ResetsAt: resets, Amount: "$10.00", UsedText: "$x"})
+	}
+	alert(8)
+	alert(8.5) // same severity: updated, not notified again
+	alert(10)
+	if strings.Join(rec.events, ",") != "opened:budget_threshold,escalated:budget_threshold" {
+		t.Fatalf("events %v", rec.events)
+	}
+	open, _ := st.ListInsights(ctx, "open")
+	if len(open) != 1 || open[0].Severity != "critical" || !strings.Contains(open[0].Title, "Daily spend budget for ann@x.com is 100% used") {
+		t.Fatalf("open %+v", open)
+	}
+	// Quiet traffic does not resolve it; a restart keeps it; the period end does.
+	e.Evaluate(ctx, time.Now())
+	e2 := NewEngine(config.Insights{Window: 10 * time.Minute}, st, rec, quiet)
+	if err := e2.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e2.Evaluate(ctx, time.Now())
+	if open, _ := st.ListInsights(ctx, "open"); len(open) != 1 {
+		t.Fatal("resolved before the period ended")
+	}
+	e2.Evaluate(ctx, resets.Add(time.Second))
+	if open, _ := st.ListInsights(ctx, "open"); len(open) != 0 {
+		t.Fatal("still open after the period ended")
+	}
+}

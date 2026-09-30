@@ -195,7 +195,14 @@ type Insight struct {
 const (
 	LimitRPM = "rpm" // requests per sliding minute
 	LimitTPM = "tpm" // input + output tokens per sliding minute
+	// Budgets count over a calendar day, week (from Monday) or month, in UTC.
+	LimitBudgetUSD    = "budget_usd"    // spend, from the prices table
+	LimitBudgetTokens = "budget_tokens" // input + output tokens
 )
+
+// IsBudget reports whether the limit counts over a period rather than a
+// sliding minute.
+func (l *Limit) IsBudget() bool { return l.Kind == LimitBudgetUSD || l.Kind == LimitBudgetTokens }
 
 // Limit is a rate limit or budget rule. It applies to a tenant, to one of its
 // applications (AppID), or to end users (User: an email, or "*" for each

@@ -160,7 +160,8 @@ export interface NewPrice {
   effective_from?: string;
 }
 
-export type LimitKind = "rpm" | "tpm";
+export type LimitKind = "rpm" | "tpm" | "budget_usd" | "budget_tokens";
+export type Period = "day" | "week" | "month";
 
 export interface Limit {
   id: string;
@@ -169,10 +170,11 @@ export interface Limit {
   user: string; // "" for everyone together, "*" for each user, or an email
   kind: LimitKind;
   amount: number;
-  period: string;
+  period: Period | ""; // budgets only
   enforcement: "hard" | "soft";
   created_at: string;
   used?: number | null; // current use, from /admin/limits/status
+  resets_at?: string; // when a budget's period ends
 }
 
 export interface NewLimit {
@@ -181,6 +183,8 @@ export interface NewLimit {
   user?: string;
   kind: LimitKind;
   amount: number;
+  period?: Period;
+  enforcement?: "hard" | "soft";
 }
 
 type List<T> = { data: T[] };

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/boramuyar/ultimate-proxy/internal/limits"
 	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
@@ -34,7 +35,10 @@ func (s *Server) listLimits(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": ls})
 }
 
-var limitKinds = []string{store.LimitRPM, store.LimitTPM}
+var (
+	limitKinds   = []string{store.LimitRPM, store.LimitTPM, store.LimitBudgetUSD, store.LimitBudgetTokens}
+	limitPeriods = []string{"day", "week", "month"}
+)
 
 // createLimit serves POST /admin/limits.
 func (s *Server) createLimit(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +48,7 @@ func (s *Server) createLimit(w http.ResponseWriter, r *http.Request) {
 		User        string   `json:"user"`
 		Kind        string   `json:"kind"`
 		Amount      *float64 `json:"amount"`
+		Period      string   `json:"period"`
 		Enforcement string   `json:"enforcement"`
 	}
 	if !decodeBody(w, r, &body) {
@@ -51,7 +56,7 @@ func (s *Server) createLimit(w http.ResponseWriter, r *http.Request) {
 	}
 	l := &store.Limit{
 		TenantID: body.TenantID, AppID: body.AppID, User: strings.ToLower(strings.TrimSpace(body.User)),
-		Kind: body.Kind, Enforcement: body.Enforcement,
+		Kind: body.Kind, Period: body.Period, Enforcement: body.Enforcement,
 	}
 	if body.Amount != nil {
 		l.Amount = *body.Amount
@@ -68,6 +73,10 @@ func (s *Server) createLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.reloadLimits(r.Context())
+	// A new budget starts from what the period has used so far.
+	if err := s.limits.RebuildRule(r.Context(), l); err != nil {
+		s.log.Warn("counting usage so far for a new budget failed", "err", err)
+	}
 	writeJSON(w, http.StatusCreated, l)
 }
 
@@ -79,8 +88,12 @@ func (s *Server) validateLimit(ctx context.Context, l *store.Limit, missingAmoun
 		return openresponses.InvalidRequest("invalid_parameter", "kind must be one of "+strings.Join(limitKinds, ", ")+".", "kind")
 	case l.Amount <= 0:
 		return openresponses.InvalidRequest("invalid_parameter", "amount must be positive.", "amount")
-	case l.Enforcement != "hard":
-		return openresponses.InvalidRequest("invalid_parameter", "rate limits are always enforced; enforcement must be hard.", "enforcement")
+	case l.IsBudget() && !slices.Contains(limitPeriods, l.Period):
+		return openresponses.InvalidRequest("invalid_parameter", "budgets need a period: day, week or month (UTC).", "period")
+	case !l.IsBudget() && l.Period != "":
+		return openresponses.InvalidRequest("invalid_parameter", "rpm and tpm count over a sliding minute and take no period.", "period")
+	case l.Enforcement != "hard" && (l.Enforcement != "soft" || !l.IsBudget()):
+		return openresponses.InvalidRequest("invalid_parameter", "enforcement is hard, or soft (warn only) for budgets.", "enforcement")
 	}
 	apps, err := s.store.ListApplications(ctx, l.TenantID)
 	if err != nil {
@@ -102,8 +115,8 @@ func (s *Server) validateLimit(ctx context.Context, l *store.Limit, missingAmoun
 	return nil
 }
 
-// updateLimit serves PATCH /admin/limits/{id}; only amount can change.
-// Changing what a rule counts means a new rule.
+// updateLimit serves PATCH /admin/limits/{id}; amount and, for budgets,
+// enforcement can change. Changing what a rule counts means a new rule.
 func (s *Server) updateLimit(w http.ResponseWriter, r *http.Request) {
 	l, err := s.store.GetLimit(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -111,13 +124,17 @@ func (s *Server) updateLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Amount *float64 `json:"amount"`
+		Amount      *float64 `json:"amount"`
+		Enforcement *string  `json:"enforcement"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Amount != nil {
 		l.Amount = *body.Amount
+	}
+	if body.Enforcement != nil {
+		l.Enforcement = *body.Enforcement
 	}
 	if e := s.validateLimit(r.Context(), l, false); e != nil {
 		openresponses.WriteError(w, e)
@@ -160,10 +177,16 @@ func (s *Server) limitsStatus(w http.ResponseWriter, r *http.Request) {
 	type status struct {
 		store.Limit
 		Used *float64 `json:"used"`
+		// ResetsAt is when a budget's period ends.
+		ResetsAt *time.Time `json:"resets_at,omitempty"`
 	}
 	out := []status{}
 	for _, l := range ls {
 		st := status{Limit: l}
+		if l.IsBudget() {
+			end := limits.PeriodEnd(l.Period, time.Now())
+			st.ResetsAt = &end
+		}
 		if l.User != "*" || user != "" {
 			if used, err := s.limits.Used(r.Context(), &l, user); err == nil {
 				st.Used = &used

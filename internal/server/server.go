@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -69,6 +70,16 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 			n = wh
 		}
 		s.insights = insights.NewEngine(cfg.Insights, st, n, log)
+		s.limits.OnBudget(func(l store.Limit, user string, used float64, resets time.Time) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			shown := l
+			shown.Amount = used
+			s.insights.Budget(ctx, insights.BudgetAlert{
+				Rule: l, User: user, Used: used, ResetsAt: resets,
+				Amount: limits.FormatAmount(&l), UsedText: limits.FormatAmount(&shown),
+			})
+		})
 	}
 	return s, nil
 }

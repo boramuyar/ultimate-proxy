@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Plus } from "lucide-react";
-import { api, type Limit, type LimitKind } from "@/api";
+import { api, type Limit, type LimitKind, type Period } from "@/api";
 import type { PageProps } from "@/App";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,10 +20,27 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Empty, ErrorBox, PageHeader } from "@/components/page";
-import { fmtNumber } from "@/format";
+import { fmtNumber, fmtTime, fmtUSD } from "@/format";
+import { Badge } from "@/components/ui/badge";
 import { useAsync, useDirectory } from "@/hooks";
 
-const UNIT: Record<LimitKind, string> = { rpm: "requests / min", tpm: "tokens / min" };
+const isBudget = (k: LimitKind) => k === "budget_usd" || k === "budget_tokens";
+
+// amount writes a value in a rule's unit: dollars for spend budgets.
+const amountOf = (kind: LimitKind, n: number) => (kind === "budget_usd" ? fmtUSD(n) : fmtNumber(n));
+
+function unit(l: Pick<Limit, "kind" | "period">): string {
+  switch (l.kind) {
+    case "rpm":
+      return "requests / min";
+    case "tpm":
+      return "tokens / min";
+    case "budget_tokens":
+      return `tokens / ${l.period}`;
+    default:
+      return `/ ${l.period}`;
+  }
+}
 
 export default function Limits(_: PageProps) {
   const list = useAsync(() => api.limits(), []);
@@ -37,7 +54,7 @@ export default function Limits(_: PageProps) {
     <>
       <PageHeader
         title="Limits"
-        description="Requests or tokens per sliding minute, for a tenant, an application, or its end users. Refused requests get 429 with Retry-After."
+        description="Rate limits per sliding minute and budgets per day, week or month (UTC), for a tenant, an application, or its end users. Refused requests get 429 with Retry-After."
       />
       <AddLimit onAdded={list.reload} />
       <ErrorBox error={list.error} />
@@ -95,10 +112,16 @@ function LimitTable({ limits, onChange }: { limits: Limit[]; onChange: () => voi
               <TableCell>{l.application_id ? dir.appName(l.application_id) : <span className="text-faint">All</span>}</TableCell>
               <TableCell className="text-[13px]">{appliesTo(l)}</TableCell>
               <TableCell className="text-right tabular-nums">
-                {fmtNumber(l.amount)} <span className="text-faint">{UNIT[l.kind]}</span>
+                {l.enforcement === "soft" && (
+                  <Badge variant="muted" className="mr-2" title="Warns at 80% and 100%, never refuses">
+                    Soft
+                  </Badge>
+                )}
+                {amountOf(l.kind, l.amount)} <span className="text-faint">{unit(l)}</span>
               </TableCell>
               <TableCell>
-                <UseBar used={l.used} amount={l.amount} />
+                <UseBar limit={l} />
+                {l.resets_at && <div className="mt-1 text-xs text-faint">Resets {fmtTime(l.resets_at)}</div>}
               </TableCell>
               <TableCell className="text-right">
                 <AlertDialog>
@@ -111,8 +134,8 @@ function LimitTable({ limits, onChange }: { limits: Limit[]; onChange: () => voi
                     <AlertDialogBody>
                       <AlertDialogTitle>Delete this limit?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        {appliesTo(l)} in {l.application_id ? dir.appName(l.application_id) : dir.tenantName(l.tenant_id)} will no longer be held to {fmtNumber(l.amount)}{" "}
-                        {UNIT[l.kind]}.
+                        {appliesTo(l)} in {l.application_id ? dir.appName(l.application_id) : dir.tenantName(l.tenant_id)} will no longer be held to {amountOf(l.kind, l.amount)}{" "}
+                        {unit(l)}.
                       </AlertDialogDescription>
                     </AlertDialogBody>
                     <AlertDialogFooter>
@@ -130,7 +153,7 @@ function LimitTable({ limits, onChange }: { limits: Limit[]; onChange: () => voi
   );
 }
 
-function UseBar({ used, amount }: { used?: number | null; amount: number }) {
+function UseBar({ limit: { used, amount, kind } }: { limit: Limit }) {
   if (used === null || used === undefined) return <span className="text-[13px] text-faint">Counted per user</span>;
   const share = Math.min(used / amount, 1);
   const color = share >= 1 ? "bg-critical" : share >= 0.8 ? "bg-warning" : "bg-foreground";
@@ -139,8 +162,8 @@ function UseBar({ used, amount }: { used?: number | null; amount: number }) {
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${share * 100}%` }} />
       </div>
-      <span className="w-20 text-right text-[13px] tabular-nums text-muted-foreground">
-        {fmtNumber(used)} / {fmtNumber(amount)}
+      <span className="w-28 text-right text-[13px] tabular-nums text-muted-foreground">
+        {amountOf(kind, used)} / {amountOf(kind, amount)}
       </span>
     </div>
   );
@@ -156,6 +179,8 @@ function AddLimit({ onAdded }: { onAdded: () => void }) {
   const [email, setEmail] = useState("");
   const [kind, setKind] = useState<LimitKind>("rpm");
   const [amount, setAmount] = useState("");
+  const [period, setPeriod] = useState<Period>("month");
+  const [enforcement, setEnforcement] = useState<"hard" | "soft">("hard");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const apps = dir.apps.filter((a) => a.tenant_id === tenant);
@@ -171,6 +196,7 @@ function AddLimit({ onAdded }: { onAdded: () => void }) {
         user: who === "each" ? "*" : who === "one" ? email.trim() : undefined,
         kind,
         amount: Number(amount),
+        ...(isBudget(kind) ? { period, enforcement } : {}),
       });
       setAmount("");
       setEmail("");
@@ -188,7 +214,8 @@ function AddLimit({ onAdded }: { onAdded: () => void }) {
       <CardHeader className="flex-col items-stretch gap-1">
         <CardTitle>Add a limit</CardTitle>
         <CardDescription>
-          "Each user" gives every end user their own allowance. Token limits are charged after each response, so one request in flight can go over.
+          "Each user" gives every end user their own allowance. Tokens and spend are charged after each response, so one request in flight can go
+          over. Budgets alert at 80% and 100% on the Insights tab; soft budgets only alert.
         </CardDescription>
       </CardHeader>
       <form onSubmit={submit} className="grid gap-3 px-5 pb-5">
@@ -254,11 +281,48 @@ function AddLimit({ onAdded }: { onAdded: () => void }) {
               <SelectContent>
                 <SelectItem value="rpm">Requests per minute</SelectItem>
                 <SelectItem value="tpm">Tokens per minute</SelectItem>
+                <SelectItem value="budget_usd">Spend budget (USD)</SelectItem>
+                <SelectItem value="budget_tokens">Token budget</SelectItem>
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Amount" htmlFor="l-amount" className="w-32">
-            <Input id="l-amount" type="number" min="1" step="1" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="600" />
+          {isBudget(kind) && (
+            <>
+              <Field label="Per" className="w-28">
+                <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
+                  <SelectTrigger aria-label="Period">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="day">Day</SelectItem>
+                    <SelectItem value="week">Week</SelectItem>
+                    <SelectItem value="month">Month</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="When reached" className="w-36">
+                <Select value={enforcement} onValueChange={(v) => setEnforcement(v as "hard" | "soft")}>
+                  <SelectTrigger aria-label="When reached">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="hard">Refuse</SelectItem>
+                    <SelectItem value="soft">Only alert</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </>
+          )}
+          <Field label={kind === "budget_usd" ? "Amount (USD)" : "Amount"} htmlFor="l-amount" className="w-32">
+            <Input
+              id="l-amount"
+              type="number"
+              min={kind === "budget_usd" ? "0.01" : "1"}
+              step={kind === "budget_usd" ? "0.01" : "1"}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder={kind === "budget_usd" ? "50" : "600"}
+            />
           </Field>
           <Button type="submit" disabled={!valid || busy}>
             <Plus /> {busy ? "Adding…" : "Add"}
