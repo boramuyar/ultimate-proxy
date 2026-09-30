@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/go-json-experiment/json v0.0.0-20260213210345-44df1a37e875
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/oauth2 v0.36.0

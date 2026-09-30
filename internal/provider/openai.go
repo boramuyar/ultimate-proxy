@@ -36,10 +36,7 @@ func NewOpenAI(name, baseURL, apiKey string, headers map[string]string, client *
 func (p *OpenAI) Name() string { return p.name }
 
 func (p *OpenAI) Create(ctx context.Context, call *Call, sink openresponses.Sink) (*Result, error) {
-	body, err := rewriteBody(call.Body, call.UpstreamModel)
-	if err != nil {
-		return nil, openresponses.InvalidRequest("invalid_json", err.Error(), "")
-	}
+	body := call.Env.UpstreamBody(call.UpstreamModel)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return nil, openresponses.ServerError("proxy_error", err.Error())
@@ -156,18 +153,6 @@ func fromSpecUsage(u *openresponses.Usage) Usage {
 		ReasoningTokens:   u.OutputTokensDetails.ReasoningTokens,
 		Reported:          true,
 	}
-}
-
-// rewriteBody swaps in the upstream model name and forces streaming.
-func rewriteBody(body []byte, model string) ([]byte, error) {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, err
-	}
-	mb, _ := json.Marshal(model)
-	m["model"] = mb
-	m["stream"] = json.RawMessage("true")
-	return json.Marshal(m)
 }
 
 func openAIErrorMessage(r io.Reader) string {

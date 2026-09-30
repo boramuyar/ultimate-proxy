@@ -112,7 +112,7 @@ const UserHeader = "X-Proxy-User-Email"
 // came from. Only applications trusted to assert users may name one; the
 // order is the X-Proxy-User-Email header, metadata.user_email, then
 // safety_identifier.
-func ResolveUser(p *store.Principal, r *http.Request, req *openresponses.Request) (email, source string) {
+func ResolveUser(p *store.Principal, r *http.Request, req *openresponses.Envelope) (email, source string) {
 	if !p.CanAssertUsers {
 		return "", "none"
 	}
