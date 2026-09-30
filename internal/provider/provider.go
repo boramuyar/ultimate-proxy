@@ -14,9 +14,8 @@ import (
 
 // Call is one request routed to an upstream.
 type Call struct {
-	Req           *openresponses.Request
-	Body          []byte // the client's original request body
-	Model         string // model name the client asked for
+	Env           *openresponses.Envelope // the parsed client request
+	Model         string                  // model name the client asked for
 	UpstreamModel string
 	ResponseID    string
 	CreatedAt     int64

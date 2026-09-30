@@ -5,10 +5,11 @@
 package insights
 
 import (
-	"bytes"
 	"encoding/json"
 	"hash/maphash"
 	"sort"
+
+	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
 )
 
 // maxSegments caps how many input items are fingerprinted per request.
@@ -47,21 +48,21 @@ func EstimateTokens(n int) int { return (n + 3) / 4 }
 
 // Compute fingerprints a raw Open Responses request body.
 func Compute(body []byte) *Fingerprint {
-	var req struct {
-		Instructions       json.RawMessage `json:"instructions"`
-		Tools              json.RawMessage `json:"tools"`
-		Input              json.RawMessage `json:"input"`
-		PromptCacheKey     *string         `json:"prompt_cache_key"`
-		PreviousResponseID *string         `json:"previous_response_id"`
+	env, err := openresponses.ParseEnvelope(body)
+	if err != nil {
+		return &Fingerprint{}
 	}
+	return FromEnvelope(env)
+}
+
+// FromEnvelope fingerprints a parsed request. It hashes the raw bytes the
+// envelope already sliced out, so the prompt is never decoded again.
+func FromEnvelope(env *openresponses.Envelope) *Fingerprint {
 	fp := &Fingerprint{}
-	if json.Unmarshal(body, &req) != nil {
-		return fp
+	if env.PromptCacheKey != nil {
+		fp.CacheKey = *env.PromptCacheKey
 	}
-	if req.PromptCacheKey != nil {
-		fp.CacheKey = *req.PromptCacheKey
-	}
-	fp.HasPrevious = req.PreviousResponseID != nil && *req.PreviousResponseID != ""
+	fp.HasPrevious = env.PreviousResponseID != nil && *env.PreviousResponseID != ""
 
 	var h maphash.Hash
 	h.SetSeed(seed)
@@ -76,41 +77,28 @@ func Compute(body []byte) *Fingerprint {
 		fp.Parts = append(fp.Parts, maphash.Bytes(seed, raw))
 	}
 
-	instr := trimNull(req.Instructions)
+	instr := env.Instructions
 	add(segInstructions, instr)
 	fp.InstructionsMasked = maphash.Bytes(seed, maskVolatile(instr))
 
-	tools := trimNull(req.Tools)
+	tools := env.Tools
 	add(segTools, tools)
 	fp.ToolsCanonical = canonicalTools(tools)
 	fp.HasInstrOrTool = len(instr) > 0 || len(tools) > 0
 
-	in := trimNull(req.Input)
 	switch {
-	case len(in) == 0:
-	case in[0] == '[':
-		var items []json.RawMessage
-		if json.Unmarshal(in, &items) == nil {
-			for i, it := range items {
-				if i == maxSegments {
-					break
-				}
-				add(segItem, it)
+	case env.InputItems != nil:
+		for i, it := range env.InputItems {
+			if i == maxSegments {
+				break
 			}
+			add(segItem, it)
 		}
-	default:
-		add(segItem, in)
+	case len(env.Input) > 0 && env.Input[0] != '[':
+		add(segItem, env.Input)
 	}
 	fp.TotalTokens = tokens
 	return fp
-}
-
-func trimNull(b []byte) []byte {
-	b = bytes.TrimSpace(b)
-	if bytes.Equal(b, []byte("null")) {
-		return nil
-	}
-	return b
 }
 
 // maskVolatile replaces runs of digits and long hex/uuid-like runs with a

@@ -33,16 +33,17 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		openresponses.WriteError(w, openresponses.NewError(http.StatusRequestEntityTooLarge, openresponses.ErrInvalidRequest, "request_too_large", err.Error(), ""))
 		return
 	}
-	var req openresponses.Request
-	if err := json.Unmarshal(body, &req); err != nil {
-		openresponses.WriteError(w, openresponses.InvalidRequest("invalid_json", "Request body is not valid JSON: "+err.Error(), ""))
+	// One pass over the body; the prompt itself is never decoded.
+	req, apiErr := openresponses.ParseEnvelope(body)
+	if apiErr != nil {
+		openresponses.WriteError(w, apiErr)
 		return
 	}
 	if req.Model == "" {
 		openresponses.WriteError(w, openresponses.InvalidRequest("missing_required_parameter", "model is required.", "model"))
 		return
 	}
-	if req.Background != nil && *req.Background {
+	if req.Background {
 		openresponses.WriteError(w, openresponses.InvalidRequest("unsupported_parameter", "background responses are not supported yet.", "background"))
 		return
 	}
@@ -60,15 +61,14 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		cacheScope string
 	)
 	if s.insights != nil {
-		fp = insights.Compute(body)
+		fp = insights.FromEnvelope(req)
 		cacheScope = principal.AppID + "\x00" + route.Provider.Name() + "/" + route.UpstreamModel
 		exp = s.insights.Tracker.Before(cacheScope, fp, start)
 	}
 
-	email, source := identity.ResolveUser(principal, r, &req)
+	email, source := identity.ResolveUser(principal, r, req)
 	call := &provider.Call{
-		Req:           &req,
-		Body:          body,
+		Env:           req,
 		Model:         req.Model,
 		UpstreamModel: route.UpstreamModel,
 		ResponseID:    openresponses.NewID("resp"),
