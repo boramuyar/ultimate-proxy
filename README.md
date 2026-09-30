@@ -207,3 +207,7 @@ scripts/compliance.sh <openresponses checkout>        # official compliance suit
 
 `cmd/fake-upstream` is a deterministic fake of the OpenAI Responses API, so tests
 and CI need no provider credentials.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
