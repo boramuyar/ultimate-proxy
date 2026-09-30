@@ -20,7 +20,7 @@ tokens and dollars, and inspected for problems such as prompt-cache prefix misse
   SSE / WebSocket        │  (stateless Go)  │─────────────► Gemini / Bedrock / Azure
   POST /v1/responses/    └──┬───────┬───────┘─────────────► OpenAI-compatible (vLLM, Ollama)
        compact              │       │ async, batched
-                     Redis (hot)   Postgres (config, usage, response store)
+                     Redis (hot)   Postgres (config, response store) + ClickHouse (usage)
 ```
 
 ## 2. Defaults I'm picking
@@ -28,10 +28,10 @@ tokens and dollars, and inspected for problems such as prompt-cache prefix misse
 | Choice | Pick | Why |
 | --- | --- | --- |
 | Language | **Go** | Cheap goroutine-per-stream, `net/http` streaming without buffering, single static binary, predictable GC at gateway loads. Rust would shave a little more latency but slows iteration; the upstream model dominates latency anyway. |
-| Config + usage storage | **Postgres** | Tenants, apps, keys, prices, and a time-partitioned `usage_events` table with rollups. One dependency to run. |
+| Config storage | **Postgres** | Tenants, apps, keys, prices, insights. Also holds `usage_events` when ClickHouse is not configured. |
 | Hot state | **Redis** | Rate-limit/budget counters, cache-affinity map, `previous_response_id` state with TTL. Optional in single-node mode (in-memory fallback). |
-| Analytics at scale | **ClickHouse later** | Same event schema; swap the sink when Postgres rollups stop being enough. Not in v1. |
-| Deploy | Docker image + docker-compose (proxy, Postgres, Redis) | Helm chart later. |
+| Request log / analytics | **ClickHouse** | Usage events and `/admin/usage` queries. Optional: without it, usage stays in Postgres with the same schema. |
+| Deploy | Docker image + docker-compose (proxy, Postgres, ClickHouse, Redis) | Helm chart later. |
 
 ## 3. Requirements mapping
 
@@ -205,8 +205,8 @@ internal/meter/          usage events, batch writer, rollups
 internal/insights/       prefix hashing, miss detection, rules, notifiers
 internal/limits/         rate limits, budgets
 internal/router/         aliases, fallbacks, affinity
-internal/store/          postgres, redis
+internal/store/          postgres, clickhouse, redis
 migrations/
-docker-compose.yml  (proxy, Postgres, fake upstream, dashboard)
+docker-compose.yml  (proxy, Postgres, ClickHouse, fake upstream, dashboard)
 web/               (dashboard)
 ```

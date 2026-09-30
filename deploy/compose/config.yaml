@@ -2,6 +2,8 @@
 # root). ${VAR}s come from .env next to docker-compose.yml.
 listen: ":8080"
 database_url: "${DATABASE_URL}"
+# The request log (every request's usage) goes to ClickHouse.
+clickhouse_url: "${CLICKHOUSE_URL}"
 
 # Who may use the dashboard and /admin. See "Signing in" in the README.
 admin:

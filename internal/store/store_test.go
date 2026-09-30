@@ -3,15 +3,18 @@ package store
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
 )
 
-// stores returns the memory store and, when TEST_DATABASE_URL is set, a
-// Postgres store, so both implementations answer the same queries the same way.
+// stores returns the memory store and, when TEST_DATABASE_URL or
+// TEST_CLICKHOUSE_URL is set, a Postgres store and a store keeping usage in
+// ClickHouse, so every implementation answers the same queries the same way.
 func stores(t *testing.T) map[string]Store {
 	t.Helper()
 	out := map[string]Store{"memory": NewMemory()}
@@ -25,6 +28,12 @@ func stores(t *testing.T) map[string]Store {
 		}
 		t.Cleanup(pg.Close)
 		out["postgres"] = pg
+	}
+	if url := os.Getenv("TEST_CLICKHOUSE_URL"); url != "" {
+		ch := testClickHouse(t, url)
+		st := WithUsage(NewMemory(), ch)
+		t.Cleanup(st.Close)
+		out["clickhouse"] = st
 	}
 	return out
 }
@@ -143,5 +152,112 @@ func TestStores(t *testing.T) {
 				t.Fatalf("prices %+v", prices)
 			}
 		})
+	}
+}
+
+// testClickHouse keeps raw events forever, so fixed test dates never expire.
+func testClickHouse(t *testing.T, url string) *ClickHouse {
+	t.Helper()
+	ch, err := NewClickHouse(context.Background(), url, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"usage_events", "usage_hourly"} {
+		if err := ch.exec(context.Background(), "TRUNCATE TABLE "+table, nil, ch.db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return ch
+}
+
+// TestClickHouseRollup checks that usage stays queryable from the hourly
+// rollup after the raw events are gone, and that partial hours at the edges of
+// a range come from the raw events.
+func TestClickHouseRollup(t *testing.T) {
+	url := os.Getenv("TEST_CLICKHOUSE_URL")
+	if url == "" {
+		t.Skip("TEST_CLICKHOUSE_URL not set")
+	}
+	ctx := context.Background()
+	ch := testClickHouse(t, url)
+	defer ch.Close()
+
+	base := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	var events []UsageEvent
+	for i := 0; i < 4; i++ { // 10:10, 10:40, 11:10, 11:40
+		events = append(events, UsageEvent{
+			TS: base.Add(time.Duration(10+30*i) * time.Minute), RequestID: openresponses.NewID("resp"),
+			TenantID: "t1", AppID: "a1", UserEmail: "a@x.com", Model: "m1", Status: "completed",
+			InputTokens: 100, OutputTokens: 10, CostUSD: 0.5,
+		})
+	}
+	events[3].Status = "failed"
+	if err := ch.InsertUsage(ctx, events); err != nil {
+		t.Fatal(err)
+	}
+	query := func(from, to time.Time) UsageRow {
+		t.Helper()
+		rows, err := ch.QueryUsage(ctx, UsageQuery{From: from, To: to, GroupBy: []string{"application"}, Filters: map[string]string{"model": "m1"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("want one row, got %+v", rows)
+		}
+		return rows[0]
+	}
+	// 10:30 to 11:30 is two partial hours, all from raw events.
+	if r := query(base.Add(30*time.Minute), base.Add(90*time.Minute)); r.Requests != 2 || r.InputTokens != 200 {
+		t.Fatalf("partial hours: %+v", r)
+	}
+	// 10:30 to 12:00: 10:40 raw, 11:00-12:00 from the rollup.
+	if r := query(base.Add(30*time.Minute), base.Add(2*time.Hour)); r.Requests != 3 || r.FailedRequests != 1 || r.CostUSD != 1.5 {
+		t.Fatalf("mixed: %+v", r)
+	}
+
+	// Drop the raw events, as the retention TTL would.
+	if err := ch.exec(ctx, "TRUNCATE TABLE usage_events", nil, ch.db); err != nil {
+		t.Fatal(err)
+	}
+	if r := query(base, base.Add(2*time.Hour)); r.Requests != 4 || r.OutputTokens != 40 || r.TotalTokens != 440 {
+		t.Fatalf("rollup only: %+v", r)
+	}
+	rows, err := ch.QueryUsage(ctx, UsageQuery{From: base, To: base.Add(2 * time.Hour), Granularity: "hour"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || !rows[1].Bucket.Equal(base.Add(time.Hour)) || rows[1].FailedRequests != 1 {
+		t.Fatalf("hourly from rollup: %+v", rows)
+	}
+}
+
+func TestClickHouseRetention(t *testing.T) {
+	url := os.Getenv("TEST_CLICKHOUSE_URL")
+	if url == "" {
+		t.Skip("TEST_CLICKHOUSE_URL not set")
+	}
+	ctx := context.Background()
+	ttl := func(ch *ClickHouse) string {
+		rc, err := ch.do(ctx, "SELECT create_table_query FROM system.tables WHERE database = currentDatabase() AND name = 'usage_events'", nil, ch.db, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rc.Close()
+		b, _ := io.ReadAll(rc)
+		return string(b)
+	}
+	for _, c := range []struct {
+		days int
+		want string
+	}{{30, "toIntervalDay(30)"}, {90, "toIntervalDay(90)"}, {0, ""}} {
+		ch, err := NewClickHouse(ctx, url, c.days)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := ttl(ch)
+		if c.want == "" && strings.Contains(got, " TTL ") || c.want != "" && !strings.Contains(got, c.want) {
+			t.Fatalf("retention %d days: table is %s", c.days, got)
+		}
+		ch.Close()
 	}
 }

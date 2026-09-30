@@ -2,7 +2,8 @@
 #
 #   dashboard      http://localhost:3000   (sign in with SSO or PROXY_ADMIN_TOKEN)
 #   proxy          http://localhost:8080   (Open Responses API and /admin)
-#   postgres       internal only; data kept in the pgdata volume
+#   postgres       internal only; tenants, keys, prices (pgdata volume)
+#   clickhouse     internal only; the request log (chdata volume)
 #   fake-upstream  internal only; the free "fake-gpt" model
 #
 # Settings come from .env (copy .env.example). Without one, the defaults
@@ -22,6 +23,19 @@ services:
       interval: 2s
       retries: 30
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8-alpine
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: proxy
+      CLICKHOUSE_USER: proxy
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+    volumes: [chdata:/var/lib/clickhouse]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 2s
+      retries: 30
+
   fake-upstream:
     build: .
     restart: unless-stopped
@@ -33,6 +47,7 @@ services:
     ports: ["${PROXY_PORT:-8080}:8080"]
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/proxy
+      CLICKHOUSE_URL: http://proxy:${CLICKHOUSE_PASSWORD:-clickhouse}@clickhouse:8123/proxy
       # Unset means the dev default; set but empty turns the token off.
       PROXY_ADMIN_TOKEN: ${PROXY_ADMIN_TOKEN-dev-admin-token}
       ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-}
@@ -55,6 +70,7 @@ services:
       retries: 30
     depends_on:
       postgres: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
       fake-upstream: {condition: service_started}
 
   dashboard:
@@ -68,3 +84,4 @@ services:
 
 volumes:
   pgdata:
+  chdata:

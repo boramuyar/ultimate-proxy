@@ -16,6 +16,10 @@ type Config struct {
 	// DatabaseURL is a Postgres URL. When empty, the proxy keeps everything
 	// in memory (development only).
 	DatabaseURL string `yaml:"database_url"`
+	// ClickHouseURL is where the request log (usage events) goes, as
+	// http://user:password@host:8123/database. When empty, usage stays in
+	// the database_url store.
+	ClickHouseURL string `yaml:"clickhouse_url"`
 	// AdminToken is the old name of Admin.Token, still accepted.
 	AdminToken string `yaml:"admin_token"`
 	Admin      Admin  `yaml:"admin"`
@@ -27,6 +31,10 @@ type Config struct {
 		QueueSize     int           `yaml:"queue_size"`
 		BatchSize     int           `yaml:"batch_size"`
 		FlushInterval time.Duration `yaml:"flush_interval"`
+		// RetentionDays is how long ClickHouse keeps each request's raw usage
+		// event. Hourly totals are kept forever. 0 keeps raw events forever;
+		// unset means 90.
+		RetentionDays *int `yaml:"retention_days"`
 	} `yaml:"usage"`
 
 	Providers []Provider `yaml:"providers"`
@@ -173,6 +181,10 @@ func (c *Config) applyDefaults() {
 	if c.Usage.FlushInterval == 0 {
 		c.Usage.FlushInterval = 250 * time.Millisecond
 	}
+	if c.Usage.RetentionDays == nil {
+		days := 90
+		c.Usage.RetentionDays = &days
+	}
 	if c.Admin.Token == "" {
 		c.Admin.Token = c.AdminToken
 	}
@@ -243,6 +255,9 @@ func splitList(in []string, lower bool) []string {
 }
 
 func (c *Config) validate() error {
+	if *c.Usage.RetentionDays < 0 {
+		return fmt.Errorf("usage.retention_days must be 0 (forever) or more")
+	}
 	if o := c.Admin.OIDC; o.Enabled() {
 		if o.ClientID == "" || o.RedirectURL == "" {
 			return fmt.Errorf("admin.oidc: client_id and redirect_url are required with issuer")
