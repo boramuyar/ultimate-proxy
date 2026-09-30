@@ -13,6 +13,7 @@ import (
 // How a caller authenticated.
 const (
 	MethodAPIKey = "api_key"
+	MethodJWT    = "jwt"
 )
 
 // Identity is who a request is billed to, whatever credential it came with.
@@ -20,7 +21,8 @@ const (
 // the key's rows in the store.
 type Identity struct {
 	Method string
-	// Subject identifies the credential: the key ID for API keys.
+	// Subject identifies the credential: the key ID for API keys, the sub
+	// claim for JWTs.
 	Subject    string
 	TenantID   string
 	TenantName string
@@ -28,7 +30,11 @@ type Identity struct {
 	AppName    string
 	// User is the end user the credential itself names, if any. API keys name
 	// none; the application may assert one per request instead.
-	User string
+	User   string
+	Groups []string
+	// AllowedModels limits the models the caller may use; nil allows all.
+	// Entries are model names or provider/model, and may end in *.
+	AllowedModels []string
 	// CanAssertUsers lets the caller name its end user in a header or in
 	// metadata.
 	CanAssertUsers bool
@@ -40,6 +46,23 @@ func (id *Identity) KeyID() string {
 		return id.Subject
 	}
 	return ""
+}
+
+// AllowsModel reports whether the caller may use a model, given the names it
+// goes by: the name the client sent and the provider/upstream model it maps to.
+func (id *Identity) AllowsModel(names ...string) bool {
+	if id.AllowedModels == nil {
+		return true
+	}
+	for _, pattern := range id.AllowedModels {
+		prefix, wildcard := strings.CutSuffix(pattern, "*")
+		for _, n := range names {
+			if n == pattern || (wildcard && strings.HasPrefix(n, prefix)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Authenticator turns a bearer token into an Identity.

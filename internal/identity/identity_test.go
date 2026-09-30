@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
@@ -61,7 +62,7 @@ func TestAPIKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Identity{Method: MethodAPIKey, Subject: k.ID, TenantID: ten.ID, TenantName: "acme", AppID: app.ID, AppName: "bot", CanAssertUsers: true}
-	if *id != want {
+	if !reflect.DeepEqual(*id, want) {
 		t.Fatalf("got %+v, want %+v", *id, want)
 	}
 	if id.KeyID() != k.ID {

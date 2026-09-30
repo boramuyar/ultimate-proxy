@@ -36,6 +36,12 @@ const (
 
 func newHarness(t testing.TB) *harness {
 	t.Helper()
+	return newHarnessWith(t, "")
+}
+
+// newHarnessWith adds YAML to the harness config.
+func newHarnessWith(t testing.TB, extra string) *harness {
+	t.Helper()
 	up := fakeupstream.New("fake-key")
 	upSrv := httptest.NewServer(up.Handler())
 	t.Cleanup(upSrv.Close)
@@ -51,7 +57,7 @@ models:
 insights:
   min_cacheable_tokens: 10
   min_requests: 5
-`))
+` + extra))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,6 +23,7 @@ type Config struct {
 	// AdminToken is the old name of Admin.Token, still accepted.
 	AdminToken string `yaml:"admin_token"`
 	Admin      Admin  `yaml:"admin"`
+	Auth       Auth   `yaml:"auth"`
 
 	MaxRequestBytes       int64         `yaml:"max_request_bytes"`
 	ResponseHeaderTimeout time.Duration `yaml:"response_header_timeout"`
@@ -84,6 +85,49 @@ type Admin struct {
 	SessionSecret string        `yaml:"session_secret"`
 	SessionTTL    time.Duration `yaml:"session_ttl"`
 	OIDC          OIDC          `yaml:"oidc"`
+}
+
+// Auth configures how API callers authenticate: with the proxy's own API
+// keys, with JWTs from the organization's own identity provider, or both.
+type Auth struct {
+	// APIKeys turns the proxy's own keys on or off. Unset means on.
+	APIKeys *bool       `yaml:"api_keys"`
+	JWT     []JWTIssuer `yaml:"jwt"`
+}
+
+// APIKeysEnabled reports whether the proxy's own API keys are accepted.
+func (a *Auth) APIKeysEnabled() bool { return a.APIKeys == nil || *a.APIKeys }
+
+// JWTIssuer is an identity provider whose access tokens the proxy accepts:
+// Keycloak (one entry per realm), Microsoft Entra ID, Okta, Auth0 and so on.
+type JWTIssuer struct {
+	// Issuer must equal the tokens' iss claim exactly, trailing slash
+	// included. Its signing keys are found
+	// through <issuer>/.well-known/openid-configuration unless JWKSURL is set.
+	Issuer  string `yaml:"issuer"`
+	JWKSURL string `yaml:"jwks_url"`
+	// Audience must be in the tokens' aud claim, so tokens the provider
+	// issued for other services are refused.
+	Audience string `yaml:"audience"`
+	// Tenant is a fixed tenant for every token from this issuer, used when
+	// Claims.Tenant is unset or missing from a token.
+	Tenant string `yaml:"tenant"`
+	// Claims names the claims that carry each part of the caller's identity.
+	Claims JWTClaims `yaml:"claims"`
+	// GroupModels lists the models each group may use. A caller may use the
+	// models of all its groups. When set, a caller in none of the groups may
+	// use no model; when unset, groups do not limit models.
+	GroupModels map[string][]string `yaml:"group_models"`
+}
+
+type JWTClaims struct {
+	Tenant string `yaml:"tenant"`
+	App    string `yaml:"app"`    // default azp, then client_id
+	User   string `yaml:"user"`   // default email
+	Groups string `yaml:"groups"` // default groups
+	// Models is a claim listing the models the caller may use, as an array
+	// or a space-separated string. Unset: the claim does not limit models.
+	Models string `yaml:"models"`
 }
 
 // OIDC is any OpenID Connect provider: Google, Microsoft Entra ID, Okta,
@@ -206,6 +250,15 @@ func (c *Config) applyDefaults() {
 	if o.DisplayName == "" {
 		o.DisplayName = "SSO"
 	}
+	for i := range c.Auth.JWT {
+		j := &c.Auth.JWT[i]
+		if j.Claims.User == "" {
+			j.Claims.User = "email"
+		}
+		if j.Claims.Groups == "" {
+			j.Claims.Groups = "groups"
+		}
+	}
 	in := &c.Insights
 	if in.CacheTTL == 0 {
 		in.CacheTTL = 5 * time.Minute
@@ -269,6 +322,26 @@ func (c *Config) validate() error {
 		if len(o.AllowedEmails)+len(o.AllowedDomains)+len(o.AllowedGroups) == 0 {
 			return fmt.Errorf("admin.oidc: set allowed_emails, allowed_domains or allowed_groups, or every account at the provider could sign in")
 		}
+	}
+	issuers := map[string]bool{}
+	for _, j := range c.Auth.JWT {
+		u, err := url.Parse(j.Issuer)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return fmt.Errorf("auth.jwt: issuer must be an http(s) URL, got %q", j.Issuer)
+		}
+		if issuers[j.Issuer] {
+			return fmt.Errorf("auth.jwt: issuer %q is listed twice", j.Issuer)
+		}
+		issuers[j.Issuer] = true
+		if j.Audience == "" {
+			return fmt.Errorf("auth.jwt %s: audience is required, or tokens meant for any other service would be accepted", j.Issuer)
+		}
+		if j.Tenant == "" && j.Claims.Tenant == "" {
+			return fmt.Errorf("auth.jwt %s: set tenant (a fixed value) or claims.tenant", j.Issuer)
+		}
+	}
+	if !c.Auth.APIKeysEnabled() && len(c.Auth.JWT) == 0 {
+		return fmt.Errorf("auth: api_keys is off and no jwt issuer is set, so no request could authenticate")
 	}
 	names := map[string]bool{}
 	for _, p := range c.Providers {

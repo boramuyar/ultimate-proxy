@@ -56,6 +56,8 @@ CREATE INDEX IF NOT EXISTS usage_events_email_ts ON usage_events (user_email, ts
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cost_usd double precision NOT NULL DEFAULT 0;
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cache_status text NOT NULL DEFAULT '';
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS expected_cached_tokens integer NOT NULL DEFAULT 0;
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS auth_method text NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS subject text NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS insights (
     id          text PRIMARY KEY,

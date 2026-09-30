@@ -39,8 +39,15 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 		return nil, err
 	}
 	s := &Server{cfg: cfg, adminAuth: adminauth.New(cfg.Admin, log), store: st, meter: m, router: router, prices: pricing.New(st, log), log: log}
+	// JWTs go first: API keys accept any token, since keys in the config
+	// need not carry the up_ prefix.
+	if len(cfg.Auth.JWT) > 0 {
+		s.auth = append(s.auth, identity.NewJWTs(cfg.Auth.JWT, st))
+	}
 	s.apiKeys = identity.NewAPIKeys(st)
-	s.auth = identity.Chain{s.apiKeys}
+	if cfg.Auth.APIKeysEnabled() {
+		s.auth = append(s.auth, s.apiKeys)
+	}
 	if !cfg.Insights.Disabled {
 		var n insights.Notifier
 		if wh := insights.NewWebhooks(cfg.Insights.WebhookURL, cfg.Insights.SlackWebhookURL, log); wh != nil {

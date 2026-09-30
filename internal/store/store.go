@@ -51,8 +51,10 @@ type UsageEvent struct {
 	TenantID          string
 	AppID             string
 	KeyID             string
+	AuthMethod        string // api_key or jwt
+	Subject           string // the key ID, or the token's sub claim
 	UserEmail         string
-	UserSource        string // header, metadata, safety_identifier or none
+	UserSource        string // jwt, header, metadata, safety_identifier or none
 	Model             string
 	Provider          string
 	UpstreamModel     string
