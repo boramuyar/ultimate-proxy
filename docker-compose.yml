@@ -4,6 +4,7 @@
 #   proxy          http://localhost:8080   (Open Responses API and /admin)
 #   postgres       internal only; tenants, keys, prices (pgdata volume)
 #   clickhouse     internal only; the request log (chdata volume)
+#   valkey         internal only; rate limit counters shared by proxy replicas
 #   fake-upstream  internal only, two replicas; the free "fake-gpt" and "fake-chat" models
 #
 # Settings come from .env (copy .env.example). Without one, the defaults
@@ -36,6 +37,15 @@ services:
       interval: 2s
       retries: 30
 
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      retries: 30
+
   fake-upstream:
     build: .
     restart: unless-stopped
@@ -53,6 +63,7 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/proxy
       CLICKHOUSE_URL: http://proxy:${CLICKHOUSE_PASSWORD:-clickhouse}@clickhouse:8123/proxy
+      REDIS_URL: redis://valkey:6379/0
       # Unset means the dev default; set but empty turns the token off.
       PROXY_ADMIN_TOKEN: ${PROXY_ADMIN_TOKEN-dev-admin-token}
       ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-}
@@ -76,6 +87,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       clickhouse: {condition: service_healthy}
+      valkey: {condition: service_healthy}
       fake-upstream: {condition: service_started}
       fake-upstream-2: {condition: service_started}
 

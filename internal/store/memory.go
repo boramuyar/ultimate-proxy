@@ -22,6 +22,7 @@ type Memory struct {
 	events   []UsageEvent
 	insights map[string]Insight
 	prices   []Price
+	limits   []Limit
 }
 
 func NewMemory() *Memory {
@@ -361,4 +362,53 @@ func (m *Memory) ListPrices(context.Context) ([]Price, error) {
 	out := append([]Price{}, m.prices...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].EffectiveFrom.Before(out[j].EffectiveFrom) })
 	return out, nil
+}
+
+func (m *Memory) CreateLimit(_ context.Context, l *Limit) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	l.ID, l.CreatedAt = openresponses.NewID("lim"), time.Now().UTC()
+	m.limits = append(m.limits, *l)
+	return nil
+}
+
+func (m *Memory) UpdateLimit(_ context.Context, l *Limit) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.limits {
+		if m.limits[i].ID == l.ID {
+			m.limits[i].Amount, m.limits[i].Period, m.limits[i].Enforcement = l.Amount, l.Period, l.Enforcement
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (m *Memory) GetLimit(_ context.Context, id string) (*Limit, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, l := range m.limits {
+		if l.ID == id {
+			return &l, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (m *Memory) ListLimits(context.Context) ([]Limit, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]Limit{}, m.limits...), nil
+}
+
+func (m *Memory) DeleteLimit(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.limits {
+		if m.limits[i].ID == id {
+			m.limits = append(m.limits[:i], m.limits[i+1:]...)
+			return nil
+		}
+	}
+	return ErrNotFound
 }

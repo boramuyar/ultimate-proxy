@@ -13,6 +13,7 @@ import Cache from "@/pages/Cache";
 import Insights from "@/pages/Insights";
 import Prices from "@/pages/Prices";
 import Access from "@/pages/Access";
+import Limits from "@/pages/Limits";
 
 const PAGES = {
   overview: { label: "Overview", Component: Overview },
@@ -20,6 +21,7 @@ const PAGES = {
   cache: { label: "Prompt cache", Component: Cache },
   insights: { label: "Insights", Component: Insights },
   prices: { label: "Prices", Component: Prices },
+  limits: { label: "Limits", Component: Limits },
   access: { label: "Tenants & keys", Component: Access },
 } as const;
 type PageKey = keyof typeof PAGES;

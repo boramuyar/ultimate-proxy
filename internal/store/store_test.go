@@ -23,7 +23,7 @@ func stores(t *testing.T) map[string]Store {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pg.pool.Exec(context.Background(), "TRUNCATE usage_events, insights, model_prices, proxy_tokens, api_keys, applications, tenants"); err != nil {
+		if _, err := pg.pool.Exec(context.Background(), "TRUNCATE usage_events, insights, model_prices, proxy_tokens, limits, api_keys, applications, tenants"); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(pg.Close)
@@ -338,6 +338,40 @@ func TestKeyPolicy(t *testing.T) {
 			}
 			if _, err := st.GetKey(ctx, "key_missing"); !errors.Is(err, ErrNotFound) {
 				t.Errorf("get missing key: %v", err)
+			}
+		})
+	}
+}
+
+func TestLimits(t *testing.T) {
+	for name, st := range stores(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			ten, _ := st.EnsureTenant(ctx, "limited")
+			app, _ := st.EnsureApplication(ctx, ten.ID, "bot", true)
+			l := &Limit{TenantID: ten.ID, AppID: app.ID, User: "*", Kind: LimitRPM, Amount: 10, Enforcement: "hard"}
+			if err := st.CreateLimit(ctx, l); err != nil || l.ID == "" || l.CreatedAt.IsZero() {
+				t.Fatalf("create: %+v %v", l, err)
+			}
+			l.Amount = 20
+			if err := st.UpdateLimit(ctx, l); err != nil {
+				t.Fatal(err)
+			}
+			got, err := st.GetLimit(ctx, l.ID)
+			if err != nil || got.Amount != 20 || got.User != "*" || got.Scope() != "user" {
+				t.Fatalf("get: %+v %v", got, err)
+			}
+			if ls, _ := st.ListLimits(ctx); len(ls) != 1 {
+				t.Fatalf("list: %v", ls)
+			}
+			if err := st.DeleteLimit(ctx, l.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.GetLimit(ctx, l.ID); err != ErrNotFound {
+				t.Errorf("after delete: %v", err)
+			}
+			if err := st.DeleteLimit(ctx, l.ID); err != ErrNotFound {
+				t.Errorf("delete twice: %v", err)
 			}
 		})
 	}

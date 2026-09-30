@@ -13,6 +13,7 @@ import (
 	"github.com/boramuyar/ultimate-proxy/internal/config"
 	"github.com/boramuyar/ultimate-proxy/internal/identity"
 	"github.com/boramuyar/ultimate-proxy/internal/insights"
+	"github.com/boramuyar/ultimate-proxy/internal/limits"
 	"github.com/boramuyar/ultimate-proxy/internal/meter"
 	"github.com/boramuyar/ultimate-proxy/internal/metrics"
 	"github.com/boramuyar/ultimate-proxy/internal/pricing"
@@ -30,6 +31,7 @@ type Server struct {
 	meter     *meter.Meter
 	router    *routing.Router
 	prices    *pricing.Table
+	limits    *limits.Engine
 	// insights is nil when insights are disabled.
 	insights *insights.Engine
 	log      *slog.Logger
@@ -52,6 +54,15 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 	if cfg.Auth.APIKeysEnabled() {
 		s.auth = append(s.auth, s.apiKeys)
 	}
+	var counter limits.Counter = limits.NewMemory()
+	if cfg.RedisURL != "" {
+		r, err := limits.NewRedis(cfg.RedisURL)
+		if err != nil {
+			return nil, err
+		}
+		counter = r
+	}
+	s.limits = limits.New(st, counter, cfg.Limits.FailClosed, log)
 	if !cfg.Insights.Disabled {
 		var n insights.Notifier
 		if wh := insights.NewWebhooks(cfg.Insights.WebhookURL, cfg.Insights.SlackWebhookURL, log); wh != nil {
@@ -65,6 +76,10 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 // Prices returns the price table. Callers reload it at startup and keep it
 // fresh with Run.
 func (s *Server) Prices() *pricing.Table { return s.prices }
+
+// Limits returns the rate limit engine. Callers load its rules at startup
+// and keep them fresh with Run.
+func (s *Server) Limits() *limits.Engine { return s.limits }
 
 // Insights returns the insight engine, or nil when insights are disabled.
 func (s *Server) Insights() *insights.Engine { return s.insights }
@@ -92,6 +107,11 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("DELETE /admin/tokens/{id}", s.revokeToken)
 	admin.HandleFunc("GET /admin/usage", s.usage)
 	admin.HandleFunc("GET /admin/insights", s.listInsights)
+	admin.HandleFunc("GET /admin/limits", s.listLimits)
+	admin.HandleFunc("POST /admin/limits", s.createLimit)
+	admin.HandleFunc("GET /admin/limits/status", s.limitsStatus)
+	admin.HandleFunc("PATCH /admin/limits/{id}", s.updateLimit)
+	admin.HandleFunc("DELETE /admin/limits/{id}", s.deleteLimit)
 	admin.HandleFunc("GET /admin/prices", s.listPrices)
 	admin.HandleFunc("POST /admin/prices", s.addPrice)
 	mux.Handle("/admin/", s.requireAdmin(admin))
