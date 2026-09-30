@@ -10,7 +10,8 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
 - `POST /v1/responses`: JSON and SSE streaming, passing the Open Responses HTTP compliance tests.
 - Upstreams: any provider that speaks Open Responses (OpenAI's Responses API and compatible servers).
   Requests and events are relayed as-is; the proxy only reads the final usage.
-- API keys per application. Each key belongs to one application and one tenant.
+- Callers authenticate with the proxy's own API keys (one per application and tenant), with access
+  tokens from your own identity provider (see "Using your own identity provider"), or both.
 - End-user attribution from the `X-Proxy-User-Email` header, `metadata.user_email` or `safety_identifier`,
   accepted only from applications allowed to name their users.
 - Usage events (tokens in/out, cached, cache writes, reasoning, latency, time to first token) written to
@@ -122,6 +123,46 @@ The dashboard and `/admin` accept two kinds of sign-in, set under `admin:` in th
 - **The break-glass token**, `admin.token` (`PROXY_ADMIN_TOKEN`): a bearer token for scripts and
   for when the provider is down. The dashboard offers it under the SSO button. Set it empty to turn
   it off once single sign-on works.
+
+## Using your own identity provider
+
+API callers can send an access token (a JWT) from the identity provider the organization already
+runs, instead of a proxy API key: Keycloak, Microsoft Entra ID, Okta, Auth0, Authentik and others.
+Tenant, application and end user are read from the token's claims, and appear in the dashboard the
+first time a token names them. Nothing has to be created in the proxy first.
+
+```yaml
+auth:
+  api_keys: true          # keep accepting up_ keys too (the default)
+  jwt:
+    - issuer: https://keycloak.example.com/realms/acme   # must equal the tokens' iss exactly
+      audience: ultimate-proxy   # required: tokens issued for other services are refused
+      tenant: acme               # a fixed tenant for this issuer, or:
+      claims:
+        tenant: org_id           # the claim naming the tenant (wins over the fixed one)
+        app: azp                 # default: azp, then client_id
+        user: email              # default: email
+        groups: groups           # default: groups
+        models: llm_models       # optional: a claim listing the models the caller may use
+      group_models:              # optional: models per group, for providers without a custom claim
+        ml-team: [smart, openai/*]
+```
+
+The proxy fetches the issuer's signing keys from its discovery document (or `jwks_url`) and checks
+the signature, issuer, audience and expiry of every token. Only asymmetric algorithms (RS, PS, ES,
+EdDSA) are accepted. A verified token is cached until it expires, for at most five minutes, so
+only the first request with a token pays for the signature check. List several issuers to serve
+several organizations, for example one per Keycloak realm.
+
+Allowed models are names or `<provider>/<model>`, optionally ending in `*`. A request for any
+other model gets `403 model_not_allowed`, and `GET /v1/models` lists only the allowed ones. When
+neither `claims.models` nor `group_models` is set, every model is allowed.
+
+With Keycloak, add an *Audience* mapper to the client so its access tokens carry
+`aud: ultimate-proxy`, and a *Group Membership* mapper (with "Full group path" off) for `groups`.
+
+Usage events record how each request authenticated (`auth_method`: `api_key` or `jwt`) and the
+token's `sub` as `subject`.
 
 ## Use it
 

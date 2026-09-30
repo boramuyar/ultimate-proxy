@@ -52,6 +52,10 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		openresponses.WriteError(w, openresponses.InvalidRequest("model_not_found", "The requested model '"+req.Model+"' does not exist.", "model"))
 		return
 	}
+	if !id.AllowsModel(req.Model, route.Provider.Name()+"/"+route.UpstreamModel) {
+		openresponses.WriteError(w, errModelNotAllowed(req.Model))
+		return
+	}
 
 	// Fingerprint the prompt prefix and note what the cache should hold for
 	// it. Caches are per upstream model, so that is the scope, per application.
@@ -95,6 +99,8 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		TenantID:      id.TenantID,
 		AppID:         id.AppID,
 		KeyID:         id.KeyID(),
+		AuthMethod:    id.Method,
+		Subject:       id.Subject,
 		UserEmail:     email,
 		UserSource:    source,
 		Model:         req.Model,
@@ -240,7 +246,8 @@ func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	if _, apiErr := s.auth.Authenticate(r.Context(), r); apiErr != nil {
+	id, apiErr := s.auth.Authenticate(r.Context(), r)
+	if apiErr != nil {
 		openresponses.WriteError(w, apiErr)
 		return
 	}
@@ -250,9 +257,17 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	data := []model{}
 	for _, m := range s.router.Models() {
+		if rt, _ := s.router.Resolve(m); !id.AllowsModel(m, rt.Provider.Name()+"/"+rt.UpstreamModel) {
+			continue
+		}
 		data = append(data, model{ID: m, Object: "model"})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+}
+
+func errModelNotAllowed(model string) *openresponses.APIError {
+	return openresponses.NewError(http.StatusForbidden, openresponses.ErrInvalidRequest, "model_not_allowed",
+		"This credential may not use the model '"+model+"'.", "model")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

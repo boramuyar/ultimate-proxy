@@ -122,6 +122,17 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"access_token": randomString(), "token_type": "Bearer", "expires_in": 3600, "id_token": s.sign(claims)})
 }
 
+// AccessToken signs a JWT with the given claims, adding iss, iat and a
+// one-hour exp unless the claims set them.
+func (s *Server) AccessToken(claims map[string]any) string {
+	now := time.Now()
+	c := map[string]any{"iss": s.Issuer, "iat": now.Unix(), "exp": now.Add(time.Hour).Unix()}
+	for k, v := range claims {
+		c[k] = v
+	}
+	return s.sign(c)
+}
+
 func (s *Server) sign(claims map[string]any) string {
 	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": "k1"})
 	body, _ := json.Marshal(claims)

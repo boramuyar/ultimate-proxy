@@ -82,10 +82,18 @@ CREATE TABLE IF NOT EXISTS usage_events (
     prompt_cache_key       String,
     cost_usd               Float64,
     cache_status           LowCardinality(String),
-    expected_cached_tokens Int32
+    expected_cached_tokens Int32,
+    auth_method            LowCardinality(String),
+    subject                String
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMM(ts)
 ORDER BY (toDate(ts), tenant_id, app_id, ts)`
+
+// Columns added after the table was first created.
+const clickhouseAddColumns = `
+ALTER TABLE usage_events
+    ADD COLUMN IF NOT EXISTS auth_method LowCardinality(String),
+    ADD COLUMN IF NOT EXISTS subject String`
 
 // The hourly rollup has one row per hour and combination of the dimensions
 // usage can be grouped by. Background merges add rows with the same key
@@ -150,7 +158,7 @@ func NewClickHouse(ctx context.Context, rawURL string, retentionDays int) (*Clic
 	if err := c.exec(ctx, "CREATE DATABASE IF NOT EXISTS "+quoteIdent(c.db), nil, ""); err != nil {
 		return nil, fmt.Errorf("connect to clickhouse: %w", err)
 	}
-	for _, stmt := range []string{clickhouseSchema, clickhouseRollupSchema, clickhouseRollupView} {
+	for _, stmt := range []string{clickhouseSchema, clickhouseAddColumns, clickhouseRollupSchema, clickhouseRollupView} {
 		if err := c.exec(ctx, stmt, nil, c.db); err != nil {
 			return nil, fmt.Errorf("apply clickhouse schema: %w", err)
 		}
@@ -258,6 +266,8 @@ type chUsageEvent struct {
 	CostUSD              float64 `json:"cost_usd"`
 	CacheStatus          string  `json:"cache_status"`
 	ExpectedCachedTokens int     `json:"expected_cached_tokens"`
+	AuthMethod           string  `json:"auth_method"`
+	Subject              string  `json:"subject"`
 }
 
 func (c *ClickHouse) InsertUsage(ctx context.Context, events []UsageEvent) error {
@@ -275,7 +285,7 @@ func (c *ClickHouse) InsertUsage(ctx context.Context, events []UsageEvent) error
 			InputTokens: e.InputTokens, CachedInputTokens: e.CachedInputTokens, CacheWriteTokens: e.CacheWriteTokens,
 			OutputTokens: e.OutputTokens, ReasoningTokens: e.ReasoningTokens, UsageReported: e.UsageReported,
 			LatencyMS: e.LatencyMS, TTFTMS: e.TTFTMS, PromptCacheKey: e.PromptCacheKey, CostUSD: e.CostUSD,
-			CacheStatus: e.CacheStatus, ExpectedCachedTokens: e.ExpectedCachedTokens,
+			CacheStatus: e.CacheStatus, ExpectedCachedTokens: e.ExpectedCachedTokens, AuthMethod: e.AuthMethod, Subject: e.Subject,
 		}); err != nil {
 			return err
 		}

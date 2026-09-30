@@ -33,6 +33,18 @@ admin:
     allowed_groups: ["${OIDC_ALLOWED_GROUPS}"]    # e.g. [proxy-admins]
     # groups_claim: groups
 
+# How API callers authenticate. With no auth section, the proxy's own API
+# keys are accepted. See "Using your own identity provider" in the README.
+# auth:
+#   api_keys: true
+#   jwt:
+#     - issuer: https://keycloak.example.com/realms/acme
+#       audience: ultimate-proxy
+#       tenant: acme              # or claims.tenant
+#       claims: {app: azp, user: email, groups: groups, models: llm_models}
+#       group_models:
+#         ml-team: [smart, openai/*]
+
 providers:
   # Any upstream that speaks Open Responses (OpenAI's Responses API or a
   # compatible server). Requests and events are relayed as-is.

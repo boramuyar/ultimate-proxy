@@ -146,6 +146,13 @@ func (m *Memory) InsertUsage(_ context.Context, events []UsageEvent) error {
 	return nil
 }
 
+// Events returns a copy of the usage events recorded so far.
+func (m *Memory) Events() []UsageEvent {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]UsageEvent(nil), m.events...)
+}
+
 func (m *Memory) QueryUsage(_ context.Context, q UsageQuery) ([]UsageRow, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

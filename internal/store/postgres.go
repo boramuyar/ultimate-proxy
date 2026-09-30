@@ -144,7 +144,7 @@ var usageColumns = []string{
 	"ts", "request_id", "tenant_id", "app_id", "key_id", "user_email", "user_source", "model", "provider",
 	"upstream_model", "stream", "status", "error_code", "http_status", "input_tokens", "cached_input_tokens",
 	"cache_write_tokens", "output_tokens", "reasoning_tokens", "usage_reported", "latency_ms", "ttft_ms",
-	"prompt_cache_key", "cost_usd", "cache_status", "expected_cached_tokens",
+	"prompt_cache_key", "cost_usd", "cache_status", "expected_cached_tokens", "auth_method", "subject",
 }
 
 func (p *Postgres) InsertUsage(ctx context.Context, events []UsageEvent) error {
@@ -155,7 +155,7 @@ func (p *Postgres) InsertUsage(ctx context.Context, events []UsageEvent) error {
 				e.TS, e.RequestID, e.TenantID, e.AppID, e.KeyID, e.UserEmail, e.UserSource, e.Model, e.Provider,
 				e.UpstreamModel, e.Stream, e.Status, e.ErrorCode, e.HTTPStatus, e.InputTokens, e.CachedInputTokens,
 				e.CacheWriteTokens, e.OutputTokens, e.ReasoningTokens, e.UsageReported, e.LatencyMS, e.TTFTMS,
-				e.PromptCacheKey, e.CostUSD, e.CacheStatus, e.ExpectedCachedTokens,
+				e.PromptCacheKey, e.CostUSD, e.CacheStatus, e.ExpectedCachedTokens, e.AuthMethod, e.Subject,
 			}, nil
 		}))
 	return err
