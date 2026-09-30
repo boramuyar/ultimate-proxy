@@ -28,6 +28,8 @@ func NewRouter(cfg *config.Config) (*Router, error) {
 		switch p.Type {
 		case "openai":
 			r.providers[p.Name] = provider.NewOpenAI(p.Name, p.BaseURL, p.APIKey, p.Headers, client)
+		case "chat_completions":
+			r.providers[p.Name] = provider.NewChat(p.Name, p.BaseURL, p.APIKey, p.Headers, client)
 		default:
 			return nil, fmt.Errorf("unknown provider type %q", p.Type)
 		}

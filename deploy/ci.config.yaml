@@ -8,11 +8,18 @@ providers:
     type: openai
     base_url: http://localhost:9090/v1
     api_key: fake-key
+  - name: local
+    type: chat_completions
+    base_url: http://localhost:9090/v1
+    api_key: fake-key
 
 models:
   - name: fake-gpt
     provider: openai
     upstream_model: gpt-fake
+  - name: fake-chat
+    provider: local
+    upstream_model: llama-fake
 
 bootstrap:
   - tenant: ci

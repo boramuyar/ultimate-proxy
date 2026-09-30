@@ -1,5 +1,5 @@
 // Package fakeupstream is a deterministic stand-in for the OpenAI Responses
-// API. Tests and the CI compliance run use it so they need no provider
+// API and the Chat Completions API. Tests and the CI compliance run use it so they need no provider
 // credentials.
 package fakeupstream
 
@@ -39,6 +39,7 @@ func New(apiKey string) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/responses", s.responses)
+	mux.HandleFunc("POST /v1/chat/completions", s.chat)
 	return mux
 }
 
