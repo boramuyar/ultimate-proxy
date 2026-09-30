@@ -25,6 +25,11 @@ jobs:
         ports: ["8123:8123"]
         options: >-
           --health-cmd "wget -qO- http://127.0.0.1:8123/ping" --health-interval 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping" --health-interval 2s --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -38,6 +43,7 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/proxy_test
           TEST_CLICKHOUSE_URL: http://proxy:clickhouse@localhost:8123/proxy_test
+          TEST_REDIS_URL: redis://localhost:6379/0
 
   compliance:
     runs-on: ubuntu-latest

@@ -80,6 +80,13 @@ func run(configPath string, log *slog.Logger) error {
 		return err
 	}
 	go srv.Prices().Run(ctx, 30*time.Second)
+	if err := srv.Limits().Reload(ctx); err != nil {
+		return err
+	}
+	go srv.Limits().Run(ctx, cfg.Limits.ReloadInterval)
+	if cfg.RedisURL == "" {
+		log.Info("rate limit counters are per process; set redis_url when running more than one replica")
+	}
 	if eng := srv.Insights(); eng != nil {
 		if err := eng.Load(ctx); err != nil {
 			return err

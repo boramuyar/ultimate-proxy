@@ -81,6 +81,16 @@ var (
 		Help: "1 while a deployment's circuit breaker is open.",
 	}, []string{"provider", "deployment"})
 
+	LimitRejections = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ultimate_proxy_limit_rejections_total",
+		Help: "Requests refused by a rate limit or budget, by kind and scope.",
+	}, []string{"kind", "scope"})
+
+	LimiterErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "ultimate_proxy_limiter_errors_total",
+		Help: "Rate limit counter calls that failed (Valkey unreachable); requests were let through unless fail_closed.",
+	})
+
 	UsageQueueDepth = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "ultimate_proxy_usage_queue_depth",
 		Help: "Usage events waiting to be written.",
@@ -93,5 +103,6 @@ func init() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		Requests, Tokens, Latency, TTFT, UpstreamErrors, UsageDropped, UsageWriteErrors, UsageQueueDepth,
 		CacheRequests, CacheMissedTokens, CostUSD, InsightsOpen, UpstreamAttempts, Fallbacks, BreakerOpen,
+		LimitRejections, LimiterErrors,
 	)
 }

@@ -20,6 +20,11 @@ type Config struct {
 	// http://user:password@host:8123/database. When empty, usage stays in
 	// the database_url store.
 	ClickHouseURL string `yaml:"clickhouse_url"`
+	// RedisURL is a Valkey (or Redis) URL, redis://host:6379/0, where rate
+	// limit counters live so every replica shares them. When empty, each
+	// replica counts on its own.
+	RedisURL string `yaml:"redis_url"`
+	Limits   Limits `yaml:"limits"`
 	// AdminToken is the old name of Admin.Token, still accepted.
 	AdminToken string `yaml:"admin_token"`
 	Admin      Admin  `yaml:"admin"`
@@ -43,6 +48,16 @@ type Config struct {
 	Routing   Routing    `yaml:"routing"`
 	Insights  Insights   `yaml:"insights"`
 	Bootstrap []Tenant   `yaml:"bootstrap"`
+}
+
+// Limits configures rate limit enforcement. The rules themselves live in the
+// database and are managed with /admin/limits.
+type Limits struct {
+	// FailClosed refuses requests while the counters (Valkey) are
+	// unreachable. By default they are let through.
+	FailClosed bool `yaml:"fail_closed"`
+	// ReloadInterval is how often each replica rereads the rules.
+	ReloadInterval time.Duration `yaml:"reload_interval"`
 }
 
 // Insights configures problem detection and alerting.
@@ -270,6 +285,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.ResponseHeaderTimeout == 0 {
 		c.ResponseHeaderTimeout = 120 * time.Second
+	}
+	if c.Limits.ReloadInterval == 0 {
+		c.Limits.ReloadInterval = 10 * time.Second
 	}
 	r := &c.Routing
 	if r.MaxAttempts == 0 {

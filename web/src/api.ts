@@ -160,6 +160,29 @@ export interface NewPrice {
   effective_from?: string;
 }
 
+export type LimitKind = "rpm" | "tpm";
+
+export interface Limit {
+  id: string;
+  tenant_id: string;
+  application_id: string; // "" for the whole tenant
+  user: string; // "" for everyone together, "*" for each user, or an email
+  kind: LimitKind;
+  amount: number;
+  period: string;
+  enforcement: "hard" | "soft";
+  created_at: string;
+  used?: number | null; // current use, from /admin/limits/status
+}
+
+export interface NewLimit {
+  tenant_id: string;
+  application_id?: string;
+  user?: string;
+  kind: LimitKind;
+  amount: number;
+}
+
 type List<T> = { data: T[] };
 
 export const api = {
@@ -189,4 +212,9 @@ export const api = {
   prices: (current: boolean) =>
     request<List<Price>>("GET", `/admin/prices${current ? "?current=true" : ""}`).then((r) => r.data),
   addPrice: (p: NewPrice) => request<Price>("POST", "/admin/prices", p),
+
+  limits: () => request<List<Limit>>("GET", "/admin/limits/status").then((r) => r.data),
+  createLimit: (l: NewLimit) => request<Limit>("POST", "/admin/limits", l),
+  updateLimit: (id: string, amount: number) => request<Limit>("PATCH", `/admin/limits/${id}`, { amount }),
+  deleteLimit: (id: string) => request<void>("DELETE", `/admin/limits/${id}`),
 };

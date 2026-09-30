@@ -357,3 +357,52 @@ func (p *Postgres) ListPrices(ctx context.Context) ([]Price, error) {
 		return pr, err
 	})
 }
+
+const limitColumns = "id, tenant_id, app_id, user_email, kind, amount, period, enforcement, created_at"
+
+func scanLimit(r pgx.Row) (Limit, error) {
+	var l Limit
+	err := r.Scan(&l.ID, &l.TenantID, &l.AppID, &l.User, &l.Kind, &l.Amount, &l.Period, &l.Enforcement, &l.CreatedAt)
+	return l, err
+}
+
+func (p *Postgres) CreateLimit(ctx context.Context, l *Limit) error {
+	l.ID = openresponses.NewID("lim")
+	return p.pool.QueryRow(ctx, `
+		INSERT INTO limits (id, tenant_id, app_id, user_email, kind, amount, period, enforcement)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING created_at`,
+		l.ID, l.TenantID, l.AppID, l.User, l.Kind, l.Amount, l.Period, l.Enforcement).Scan(&l.CreatedAt)
+}
+
+func (p *Postgres) UpdateLimit(ctx context.Context, l *Limit) error {
+	tag, err := p.pool.Exec(ctx, `UPDATE limits SET amount = $2, period = $3, enforcement = $4 WHERE id = $1`,
+		l.ID, l.Amount, l.Period, l.Enforcement)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (p *Postgres) GetLimit(ctx context.Context, id string) (*Limit, error) {
+	l, err := scanLimit(p.pool.QueryRow(ctx, `SELECT `+limitColumns+` FROM limits WHERE id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &l, err
+}
+
+func (p *Postgres) ListLimits(ctx context.Context) ([]Limit, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+limitColumns+` FROM limits ORDER BY created_at, id`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Limit, error) { return scanLimit(r) })
+}
+
+func (p *Postgres) DeleteLimit(ctx context.Context, id string) error {
+	tag, err := p.pool.Exec(ctx, `DELETE FROM limits WHERE id = $1`, id)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return err
+}

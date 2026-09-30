@@ -108,3 +108,18 @@ CREATE INDEX IF NOT EXISTS proxy_tokens_expires_at ON proxy_tokens (expires_at);
 
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS expires_at timestamptz;
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS allowed_models text[];
+
+-- Rate limits and budgets. A rule applies to a tenant, to one of its
+-- applications, or to end users: user is an email, or * for each user on
+-- their own. Counters live in Valkey (or in process), not here.
+CREATE TABLE IF NOT EXISTS limits (
+    id          text PRIMARY KEY,
+    tenant_id   text NOT NULL REFERENCES tenants (id),
+    app_id      text NOT NULL DEFAULT '',
+    user_email  text NOT NULL DEFAULT '',
+    kind        text NOT NULL,
+    amount      double precision NOT NULL,
+    period      text NOT NULL DEFAULT '',
+    enforcement text NOT NULL DEFAULT 'hard',
+    created_at  timestamptz NOT NULL DEFAULT now()
+);

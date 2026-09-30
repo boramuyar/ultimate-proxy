@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -90,6 +91,28 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  start.Unix(),
 	}
 	w.Header().Set("X-Proxy-Request-Id", call.ResponseID)
+
+	dec, limitErr := s.limits.Check(ctx, limitSubject(id.TenantID, id.AppID, email))
+	dec.Headers(w.Header())
+	if !dec.Allowed {
+		ae := openresponses.NewError(http.StatusTooManyRequests, openresponses.ErrTooManyRequests, "rate_limit_exceeded", dec.Message(), "")
+		if limitErr != nil {
+			ae = openresponses.NewError(http.StatusServiceUnavailable, openresponses.ErrServer, "limits_unavailable", dec.Message(), "")
+		}
+		openresponses.WriteError(w, ae)
+		// Refused requests are logged too, with no tokens, so they show up
+		// in usage.
+		ev := store.UsageEvent{
+			TS: start.UTC(), RequestID: call.ResponseID, TenantID: id.TenantID, AppID: id.AppID, KeyID: id.KeyID(),
+			AuthMethod: id.Method, Subject: id.Subject, UserEmail: email, UserSource: source, Model: req.Model,
+			Provider: primary.Pool.Name, UpstreamModel: primary.UpstreamModel, Stream: req.Stream,
+			Status: "rejected", ErrorCode: ae.CodeString(), HTTPStatus: ae.Status,
+			LatencyMS: int(time.Since(start).Milliseconds()),
+		}
+		s.meter.Record(ev)
+		s.observe(&ev, id, time.Since(start))
+		return
+	}
 
 	var (
 		sw   *sse.Writer
@@ -231,6 +254,15 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	s.meter.Record(ev)
 	s.observe(&ev, id, elapsed)
+	// Charge token limits off the request path: the response only
+	// completes when the handler returns.
+	if n := ev.InputTokens + ev.OutputTokens; n > 0 && dec.ChargesTokens() {
+		go func() {
+			cctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			s.limits.Charge(cctx, dec, n)
+		}()
+	}
 	if s.insights != nil {
 		s.insights.Record(insights.Observation{
 			TS: start, TenantID: id.TenantID, TenantName: id.TenantName,

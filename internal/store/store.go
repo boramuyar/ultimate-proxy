@@ -191,6 +191,38 @@ type Insight struct {
 	ResolvedAt *time.Time     `json:"resolved_at,omitempty"`
 }
 
+// Limit kinds.
+const (
+	LimitRPM = "rpm" // requests per sliding minute
+	LimitTPM = "tpm" // input + output tokens per sliding minute
+)
+
+// Limit is a rate limit or budget rule. It applies to a tenant, to one of its
+// applications (AppID), or to end users (User: an email, or "*" for each
+// user separately), within the tenant or one application.
+type Limit struct {
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	AppID       string    `json:"application_id"`
+	User        string    `json:"user"`
+	Kind        string    `json:"kind"`
+	Amount      float64   `json:"amount"`
+	Period      string    `json:"period"`      // day, week or month for budgets; "" for per-minute limits
+	Enforcement string    `json:"enforcement"` // hard blocks; soft only warns
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// Scope is what the limit counts: tenant, application or user.
+func (l *Limit) Scope() string {
+	switch {
+	case l.User != "":
+		return "user"
+	case l.AppID != "":
+		return "application"
+	}
+	return "tenant"
+}
+
 type Store interface {
 	EnsureTenant(ctx context.Context, name string) (*Tenant, error)
 	ListTenants(ctx context.Context) ([]Tenant, error)
@@ -215,6 +247,12 @@ type Store interface {
 	// tokens. TenantName and AppName are filled in.
 	LookupProxyToken(ctx context.Context, hash string) (*ProxyToken, error)
 	RevokeProxyToken(ctx context.Context, id string) error
+	CreateLimit(ctx context.Context, l *Limit) error
+	// UpdateLimit saves a limit's amount, period and enforcement.
+	UpdateLimit(ctx context.Context, l *Limit) error
+	GetLimit(ctx context.Context, id string) (*Limit, error)
+	ListLimits(ctx context.Context) ([]Limit, error)
+	DeleteLimit(ctx context.Context, id string) error
 	InsertUsage(ctx context.Context, events []UsageEvent) error
 	QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, error)
 	AddPrice(ctx context.Context, p *Price) error

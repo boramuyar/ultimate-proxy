@@ -9,13 +9,19 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
 
 - `POST /v1/responses`: JSON and SSE streaming, passing the Open Responses HTTP compliance tests.
 - Upstreams: any provider that speaks Open Responses (OpenAI's Responses API and compatible servers),
-  relayed untouched, and any server that only speaks Chat Completions (vLLM, Ollama, llama.cpp,
-  LiteLLM, Groq, Together, OpenRouter and others), translated with provider `type: chat_completions`.
+  relayed as-is (the proxy only reads the final usage), and any server that only speaks Chat
+  Completions (vLLM, Ollama, llama.cpp, LiteLLM, Groq, Together, OpenRouter and others), translated
+  with provider `type: chat_completions`.
   Translation covers text, images, files as data, function tools and `tool_choice`, structured
   output (`text.format`), reasoning effort and streamed reasoning, and cached-token usage. It
   rejects with a 400 what Chat Completions cannot express: `previous_response_id`, hosted tools and
   item references. The output limit is sent as `max_tokens`, which every such server accepts.
-  Requests and events are relayed as-is; the proxy only reads the final usage.
+- Several keys or servers per provider, retries, circuit breakers and fallback models, with each
+  conversation kept on the deployment that has it cached (see "Retries, fallbacks and several keys").
+- API keys that expire and are limited to some models, and short-lived tokens for agents on users'
+  devices.
+- Rate limits per tenant, application or end user, in requests or tokens per minute, shared across
+  replicas through Valkey (see "Rate limits").
 - Callers authenticate with the proxy's own API keys (one per application and tenant), with access
   tokens from your own identity provider (see "Using your own identity provider"), or both.
 - End-user attribution from the `X-Proxy-User-Email` header, `metadata.user_email` or `safety_identifier`,
@@ -30,8 +36,8 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
 - Cost in USD from a versioned prices table, on every usage event and in `/admin/usage`.
 - Prometheus metrics at `/metrics`.
 
-Not built yet: WebSocket transport, `/v1/responses/compact`, background responses, budgets and rate
-limits. They are later phases in the design doc.
+Not built yet: WebSocket transport, `/v1/responses/compact`, background responses, and spend
+budgets. They are later phases in the design doc.
 
 ## Run it
 
@@ -281,6 +287,34 @@ vLLM). A conversation is, first match wins within an application and model: the
 message. A request with `previous_response_id` goes to the deployment that produced that response.
 If the sticky deployment is resting or its breaker is open, the conversation moves once and sticks
 to the new one. `sticky: false` on a provider turns it off. The session map is per process for now.
+
+## Rate limits
+
+Rules live in the database and apply to a tenant, one of its applications, or end users: `user` is an
+email, or `*` to give every user their own allowance. `rpm` counts requests and `tpm` counts input
+plus output tokens, both over a sliding minute.
+
+```sh
+# 600 requests a minute for the whole tenant, and 20 a minute for each user of one application.
+curl -s -X POST localhost:8080/admin/limits -H "$ADMIN" -d '{"tenant_id": "<tenant id>", "kind": "rpm", "amount": 600}'
+curl -s -X POST localhost:8080/admin/limits -H "$ADMIN" \
+  -d '{"tenant_id": "<tenant id>", "application_id": "<app id>", "user": "*", "kind": "rpm", "amount": 20}'
+curl -s localhost:8080/admin/limits -H "$ADMIN"                       # list; PATCH or DELETE /admin/limits/<id>
+curl -s "localhost:8080/admin/limits/status?user=ann@example.com" -H "$ADMIN"   # current use
+```
+
+A refused request gets `429 rate_limit_exceeded` with `Retry-After` and a message naming the scope,
+and is logged in usage with status `rejected`. Every response carries OpenAI-style
+`x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests` and `x-ratelimit-reset-requests` (and
+the `-tokens` set) for the tightest rule, so SDKs back off on their own. Token limits are checked
+before a request and charged after it, so a request already in flight can overshoot by its own size.
+
+Counters live in Valkey when `redis_url` is set (the compose stack runs one), and every replica shares
+them with one round trip per request. Without it each proxy counts on its own, so set it when running
+more than one. If Valkey is unreachable, requests are let through and
+`ultimate_proxy_limiter_errors_total` counts it; `limits.fail_closed: true` refuses them instead.
+Rules are cached in each proxy and reread every 10 seconds, so the database is never on the request
+path.
 
 ## Prices
 
