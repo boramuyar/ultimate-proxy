@@ -75,6 +75,7 @@ dashboard on http://localhost:5173, which forwards `/admin` to `localhost:8080`.
 | --- | --- |
 | Tenants, applications, API keys, prices, insights | Postgres (`database_url`) |
 | Request log: one usage event per request (90 days by default) and hourly totals (forever), behind every `/admin/usage` query | ClickHouse (`clickhouse_url`) |
+| Rate limit and budget counters | Valkey, Redis or Dragonfly (`redis_url`) |
 
 In ClickHouse, each request's raw event is kept for `usage.retention_days` (default 90; 0 keeps them
 forever) and then deleted. Every insert also adds to an hourly rollup (`usage_hourly`: requests, tokens
@@ -93,6 +94,22 @@ go into the hourly rollup only.
 INSERT INTO usage_events
 SELECT * FROM postgresql('postgres:5432', 'proxy', 'usage_events', 'postgres', '<POSTGRES_PASSWORD>');
 ```
+
+### Using your own Redis or Dragonfly
+
+The counters need any server that speaks the Redis protocol with Lua scripts and Redis 7 commands:
+Valkey 7.2 or later, Redis 7 or later, or Dragonfly. Valkey 8, Redis 7.0 and Dragonfly 2.0 are tested.
+Cluster mode is not supported. To use one you already run instead of the bundled Valkey, add this to
+`.env`:
+
+```sh
+REDIS_URL=redis://:password@redis.internal:6379/3   # rediss:// for TLS; host.docker.internal for this machine
+COMPOSE_FILE=docker-compose.yml:deploy/compose/external-redis.yml
+```
+
+`COMPOSE_FILE` adds `deploy/compose/external-redis.yml`, which stops compose from starting the bundled
+Valkey. Every key starts with `rl/`, so a database number of its own (`/3` above) keeps them apart from
+your other data. Nothing in it needs a backup: the proxy rebuilds budgets from the usage log.
 
 ## Dashboard
 
@@ -375,7 +392,8 @@ and is logged in usage with status `rejected`. Every response carries OpenAI-sty
 the `-tokens` set) for the tightest rule, so SDKs back off on their own. Token limits are checked
 before a request and charged after it, so a request already in flight can overshoot by its own size.
 
-Counters live in Valkey when `redis_url` is set (the compose stack runs one), and every replica shares
+Counters live in Valkey when `redis_url` is set (the compose stack runs one; Redis or Dragonfly work
+too, see [Using your own Redis or Dragonfly](#using-your-own-redis-or-dragonfly)), and every replica shares
 them with one round trip per request. Without it each proxy counts on its own, so set it when running
 more than one. If Valkey is unreachable, requests are let through and
 `ultimate_proxy_limiter_errors_total` counts it; `limits.fail_closed: true` refuses them instead.

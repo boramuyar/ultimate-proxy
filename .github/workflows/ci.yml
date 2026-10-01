@@ -48,6 +48,32 @@ jobs:
           TEST_CLICKHOUSE_URL: http://proxy:clickhouse@localhost:8123/proxy_test
           TEST_REDIS_URL: redis://localhost:6379/0
 
+  counters:
+    # The rate limit counters against the other servers redis_url accepts.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [redis:7.0-alpine, docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Start ${{ matrix.image }}
+        run: |
+          docker run -d --name counters -p 6379:6379 --ulimit memlock=-1 "${{ matrix.image }}"
+          for i in $(seq 30); do
+            if exec 3<>/dev/tcp/localhost/6379 && printf 'PING\r\n' >&3 && read -t 2 r <&3 && [[ $r == +PONG* ]]; then exit 0; fi
+            sleep 1
+          done
+          docker logs counters; exit 1
+      - name: Test
+        run: |
+          go test -race -count=1 -v ./internal/limits/ | tee out.txt
+          grep -q -- '--- PASS: TestRedisSharedAcrossEngines' out.txt
+        env:
+          TEST_REDIS_URL: redis://localhost:6379/0
+
   compliance:
     runs-on: ubuntu-latest
     services:
