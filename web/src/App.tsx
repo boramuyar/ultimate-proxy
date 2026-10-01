@@ -14,6 +14,7 @@ import Insights from "@/pages/Insights";
 import Prices from "@/pages/Prices";
 import Access from "@/pages/Access";
 import Limits from "@/pages/Limits";
+import Audit from "@/pages/Audit";
 
 const PAGES = {
   overview: { label: "Overview", Component: Overview },
@@ -23,6 +24,7 @@ const PAGES = {
   prices: { label: "Prices", Component: Prices },
   limits: { label: "Limits", Component: Limits },
   access: { label: "Tenants & keys", Component: Access },
+  audit: { label: "Audit log", Component: Audit },
 } as const;
 type PageKey = keyof typeof PAGES;
 

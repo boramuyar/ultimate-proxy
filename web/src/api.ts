@@ -124,6 +124,21 @@ export interface UsageParams {
   filters?: Partial<Record<"tenant_id" | "application_id" | "email" | "model" | "provider" | "cache_status" | `tag:${string}`, string>>;
 }
 
+export interface AuditEntry {
+  id: string;
+  ts: string;
+  actor_method: "oidc" | "token";
+  actor_email?: string;
+  actor_name?: string;
+  actor_role?: string;
+  action: string;
+  method: string;
+  path: string;
+  target_id?: string;
+  status: number;
+  request?: unknown;
+}
+
 export interface Insight {
   id: string;
   kind: string;
@@ -216,6 +231,9 @@ export const api = {
   prices: (current: boolean) =>
     request<List<Price>>("GET", `/admin/prices${current ? "?current=true" : ""}`).then((r) => r.data),
   addPrice: (p: NewPrice) => request<Price>("POST", "/admin/prices", p),
+
+  audit: (before?: string) =>
+    request<List<AuditEntry>>("GET", `/admin/audit?limit=100${before ? `&before=${encodeURIComponent(before)}` : ""}`).then((r) => r.data),
 
   limits: () => request<List<Limit>>("GET", "/admin/limits/status").then((r) => r.data),
   createLimit: (l: NewLimit) => request<Limit>("POST", "/admin/limits", l),

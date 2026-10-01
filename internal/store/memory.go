@@ -21,6 +21,7 @@ type Memory struct {
 	tokens   map[string]*ProxyToken // by hash
 	events   []UsageEvent
 	insights map[string]Insight
+	audit    []AuditEntry
 	prices   []Price
 	limits   []Limit
 }
@@ -414,4 +415,23 @@ func (m *Memory) DeleteLimit(_ context.Context, id string) error {
 		}
 	}
 	return ErrNotFound
+}
+
+func (m *Memory) AddAudit(_ context.Context, e *AuditEntry) error {
+	m.mu.Lock()
+	m.audit = append(m.audit, *e)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Memory) ListAudit(_ context.Context, before time.Time, limit int) ([]AuditEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []AuditEntry
+	for i := len(m.audit) - 1; i >= 0 && len(out) < limit; i-- {
+		if before.IsZero() || m.audit[i].TS.Before(before) {
+			out = append(out, m.audit[i])
+		}
+	}
+	return out, nil
 }

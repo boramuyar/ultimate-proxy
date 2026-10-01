@@ -351,6 +351,40 @@ func (p *Postgres) ListInsights(ctx context.Context, status string) ([]Insight, 
 	})
 }
 
+func (p *Postgres) AddAudit(ctx context.Context, e *AuditEntry) error {
+	var req any
+	if len(e.Request) > 0 {
+		req = string(e.Request)
+	}
+	_, err := p.pool.Exec(ctx, `
+		INSERT INTO audit_log (id, ts, actor_method, actor_email, actor_name, actor_role, action, method, path, target_id, status, request)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
+		e.ID, e.TS, e.ActorMethod, e.ActorEmail, e.ActorName, e.ActorRole, e.Action, e.Method, e.Path, e.TargetID, e.Status, req)
+	return err
+}
+
+func (p *Postgres) ListAudit(ctx context.Context, before time.Time, limit int) ([]AuditEntry, error) {
+	if before.IsZero() {
+		before = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT id, ts, actor_method, actor_email, actor_name, actor_role, action, method, path, target_id, status, request
+		FROM audit_log WHERE ts < $1 ORDER BY ts DESC, id DESC LIMIT $2`, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (AuditEntry, error) {
+		var e AuditEntry
+		var req []byte
+		err := r.Scan(&e.ID, &e.TS, &e.ActorMethod, &e.ActorEmail, &e.ActorName, &e.ActorRole, &e.Action, &e.Method,
+			&e.Path, &e.TargetID, &e.Status, &req)
+		if len(req) > 0 {
+			e.Request = req
+		}
+		return e, err
+	})
+}
+
 func (p *Postgres) AddPrice(ctx context.Context, pr *Price) error {
 	return p.pool.QueryRow(ctx, `
 		INSERT INTO model_prices (id, model, input, cached_input, cache_write, output, effective_from)

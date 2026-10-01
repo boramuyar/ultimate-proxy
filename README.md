@@ -100,11 +100,24 @@ The dashboard (`web/`: React, Tailwind CSS and shadcn/ui components, light theme
 
 - **Overview**: requests, tokens, cost and cache hit rate over 24 hours, 7 days or 30 days, with the
   top applications and users.
-- **Usage**: group by tenant, application, email, model, provider or cache status, filter, export CSV.
+- **Usage**: group by tenant, application, email, model, provider, cache status or a request tag,
+  filter, export CSV.
 - **Prompt cache**: each application's hit rate and why its requests miss.
 - **Insights**: open and resolved problems with their cause and fix.
 - **Prices**: prices in effect and their history; add a new price.
 - **Tenants & keys**: create tenants, applications and keys; revoke keys.
+- **Audit log**: who changed what, and every sign-in.
+
+### Audit log
+
+Every request to the admin API that can change something (`POST`, `PATCH`, `DELETE`) is recorded in
+Postgres after it is served: when, who (the signed-in email, or the admin token), the action (such as
+`key.create` or `limit.update`), the object's id, the JSON body that was sent, and the HTTP status, so
+refused and failed attempts show too. Sign-ins are recorded, and so are people the identity provider
+vouched for but the allow lists refused. Wrong admin tokens are only logged, since anyone can send
+them. Reads are not recorded, and replies never are: a new key's secret stays out of the log. Read it
+on the dashboard's Audit log tab or at `GET /admin/audit?limit=100&before=<RFC 3339 time>`, newest
+first. Entries are kept until you delete them from the `audit_log` table.
 
 ## Signing in
 

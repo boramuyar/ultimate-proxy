@@ -23,7 +23,7 @@ func stores(t *testing.T) map[string]Store {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pg.pool.Exec(context.Background(), "TRUNCATE usage_events, insights, model_prices, proxy_tokens, limits, api_keys, applications, tenants"); err != nil {
+		if _, err := pg.pool.Exec(context.Background(), "TRUNCATE usage_events, audit_log, insights, model_prices, proxy_tokens, limits, api_keys, applications, tenants"); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(pg.Close)
@@ -397,6 +397,37 @@ func TestLimits(t *testing.T) {
 			}
 			if err := st.DeleteLimit(ctx, l.ID); err != ErrNotFound {
 				t.Errorf("delete twice: %v", err)
+			}
+		})
+	}
+}
+
+func TestAudit(t *testing.T) {
+	for name, st := range stores(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+			for i, e := range []AuditEntry{
+				{ActorMethod: "oidc", ActorEmail: "ada@x.com", Action: "tenant.create", Method: "POST", Path: "/admin/tenants", Status: 201, Request: []byte(`{"name":"acme"}`)},
+				{ActorMethod: "token", Action: "key.revoke", Method: "DELETE", Path: "/admin/keys/k1", TargetID: "k1", Status: 204},
+				{ActorMethod: "oidc", ActorEmail: "ada@x.com", Action: "sign_in", Method: "GET", Path: "/admin/auth/callback", Status: 200},
+			} {
+				e.ID, e.TS = openresponses.NewID("aud"), base.Add(time.Duration(i)*time.Minute)
+				if err := st.AddAudit(ctx, &e); err != nil {
+					t.Fatal(err)
+				}
+			}
+			all, err := st.ListAudit(ctx, time.Time{}, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(all) != 3 || all[0].Action != "sign_in" || all[1].TargetID != "k1" || all[1].Request != nil ||
+				!strings.Contains(string(all[2].Request), `"acme"`) || !all[2].TS.Equal(base) {
+				t.Fatalf("audit: %+v", all)
+			}
+			page, err := st.ListAudit(ctx, all[0].TS, 1)
+			if err != nil || len(page) != 1 || page[0].Action != "key.revoke" {
+				t.Fatalf("page: %+v %v", page, err)
 			}
 		})
 	}
