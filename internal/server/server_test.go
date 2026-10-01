@@ -377,3 +377,30 @@ func TestModelsPassThrough(t *testing.T) {
 		t.Errorf("the provider's own error passes through: %d", resp.StatusCode)
 	}
 }
+
+func TestRequestTags(t *testing.T) {
+	h := newHarness(t)
+	resp := h.post(trustedKey, `{"model":"gpt","input":"hi"}`, "X-Proxy-Tags", "feature=search,env=prod")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d: %v", resp.StatusCode, decode(t, resp))
+	}
+	resp.Body.Close()
+	resp = h.postTo("/openai/v1/chat/completions", trustedKey, `{"model":"gpt","messages":[{"role":"user","content":"hi"}]}`, "X-Proxy-Tags", "feature=chat")
+	if resp.StatusCode != 200 {
+		t.Fatalf("chat status %d: %v", resp.StatusCode, decode(t, resp))
+	}
+	resp.Body.Close()
+	rows := h.usage(store.UsageQuery{GroupBy: []string{"tag:feature"}}, 2)
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.Group["tag:feature"]] += r.Requests
+	}
+	if got["search"] != 1 || got["chat"] != 1 {
+		t.Fatalf("usage by tag: %+v", rows)
+	}
+
+	resp = h.post(trustedKey, `{"model":"gpt","input":"hi"}`, "X-Proxy-Tags", "Feature=search")
+	if body := decode(t, resp); resp.StatusCode != 400 || body["error"].(map[string]any)["code"] != "invalid_tags" {
+		t.Fatalf("bad tags: %d %v", resp.StatusCode, body)
+	}
+}

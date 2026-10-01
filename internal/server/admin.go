@@ -221,10 +221,11 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) {
 
 // usage serves GET /admin/usage.
 //
-//	group_by     comma-separated: tenant, application, email, model, provider (default tenant)
+//	group_by     comma-separated: tenant, application, email, model, provider,
+//	             cache or tag:<key> (default tenant)
 //	from, to     RFC 3339 (default: the last 24 hours)
 //	granularity  hour or day (default: one row per group)
-//	tenant_id, application_id, email, model, provider  filters
+//	tenant_id, application_id, email, model, provider, cache_status, tag:<key>  filters
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	qs := r.URL.Query()
 	q := store.UsageQuery{
@@ -258,6 +259,11 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	for param, dim := range map[string]string{"tenant_id": "tenant", "application_id": "application", "email": "email", "model": "model", "provider": "provider", "cache_status": "cache"} {
 		if v := qs.Get(param); v != "" {
 			q.Filters[dim] = v
+		}
+	}
+	for param := range qs {
+		if v := qs.Get(param); strings.HasPrefix(param, "tag:") && v != "" {
+			q.Filters[param] = v
 		}
 	}
 	if err := q.Validate(); err != nil {

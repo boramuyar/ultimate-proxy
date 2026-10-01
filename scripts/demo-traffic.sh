@@ -31,11 +31,11 @@ curl -sf "${H[@]}" "$URL/admin/prices" \
 
 SYSTEM="You are a helpful assistant for a large company. Answer briefly and cite the knowledge base. $(printf 'Follow the style guide carefully. %.0s' {1..150})"
 
-send() { # key email instructions input [stream]
+send() { # key email instructions input [stream] [tags]
   local body
   body=$(printf '{"model":"gpt-fake","instructions":"%s","input":"%s","stream":%s}' "$3" "$4" "${5:-false}")
   curl -s -o /dev/null "$URL/fake/v1/responses" -H "Authorization: Bearer $1" \
-    -H "X-Proxy-User-Email: $2" -H "Content-Type: application/json" -d "$body"
+    -H "X-Proxy-User-Email: $2" -H "X-Proxy-Tags: ${6:-env=prod}" -H "Content-Type: application/json" -d "$body"
 }
 
 echo "== sending traffic"
@@ -46,7 +46,7 @@ for i in $(seq 1 12); do
   send "$search" "user$((i % 3))@acme.com" "NOCACHE $SYSTEM" "Find docs about topic $i"
   # writer is healthy apart from answers that get cut off.
   if ((i % 3 == 0)); then q="Write a long essay HIT_MAX_TOKENS"; else q="Write a haiku about $i"; fi
-  send "$writer" "editor$((i % 2))@globex.com" "$SYSTEM" "$q"
+  send "$writer" "editor$((i % 2))@globex.com" "$SYSTEM" "$q" false "env=prod,feature=$( ((i % 2)) && echo blog || echo newsletter)"
   # agent caches well but some streams fail.
   if ((i % 4 == 0)); then q="Run the task FAIL_MIDSTREAM"; else q="Plan step $i"; fi
   send "$agent" "ops@globex.com" "$SYSTEM" "$q" true

@@ -292,6 +292,9 @@ func (m *Memory) QueryUsage(_ context.Context, q UsageQuery) ([]UsageRow, error)
 }
 
 func dimension(e *UsageEvent, d string) string {
+	if k, ok := TagDimension(d); ok {
+		return e.Tags[k]
+	}
 	switch d {
 	case "tenant":
 		return e.TenantID

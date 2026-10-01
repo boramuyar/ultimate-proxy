@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -101,9 +102,12 @@ type UsageEvent struct {
 	// should have been cached, when the same prefix was sent recently.
 	CacheStatus          string
 	ExpectedCachedTokens int
+	// Tags are the caller's own labels from the X-Proxy-Tags header, such
+	// as feature=search. See ParseTags.
+	Tags map[string]string
 }
 
-// Dimensions usage can be grouped and filtered by.
+// Dimensions usage can be grouped and filtered by, besides "tag:<key>".
 var UsageDimensions = map[string]string{
 	"tenant":      "tenant_id",
 	"application": "app_id",
@@ -115,19 +119,33 @@ var UsageDimensions = map[string]string{
 
 type UsageQuery struct {
 	From, To    time.Time
-	GroupBy     []string          // keys of UsageDimensions
+	GroupBy     []string          // keys of UsageDimensions, or "tag:<key>"
 	Granularity string            // "", "hour" or "day"
-	Filters     map[string]string // UsageDimensions key -> value
+	Filters     map[string]string // dimension -> value
+}
+
+// TagDimension returns the tag key of a "tag:<key>" dimension.
+func TagDimension(d string) (key string, ok bool) {
+	key, ok = strings.CutPrefix(d, "tag:")
+	return key, ok && validTagKey(key)
+}
+
+func validDimension(d string) bool {
+	_, ok := UsageDimensions[d]
+	if !ok {
+		_, ok = TagDimension(d)
+	}
+	return ok
 }
 
 func (q *UsageQuery) Validate() error {
 	for _, g := range q.GroupBy {
-		if _, ok := UsageDimensions[g]; !ok {
+		if !validDimension(g) {
 			return fmt.Errorf("unknown group_by %q", g)
 		}
 	}
 	for f := range q.Filters {
-		if _, ok := UsageDimensions[f]; !ok {
+		if !validDimension(f) {
 			return fmt.Errorf("unknown filter %q", f)
 		}
 	}

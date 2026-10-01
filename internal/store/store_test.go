@@ -76,7 +76,8 @@ func TestStores(t *testing.T) {
 			ttft := 120
 			events := []UsageEvent{
 				{TS: base, UserEmail: "a@x.com", Model: "m1", InputTokens: 100, CachedInputTokens: 40, OutputTokens: 10, Status: "completed", TTFTMS: &ttft},
-				{TS: base.Add(time.Minute), UserEmail: "a@x.com", Model: "m1", InputTokens: 50, OutputTokens: 5, Status: "completed"},
+				{TS: base.Add(time.Minute), UserEmail: "a@x.com", Model: "m1", InputTokens: 50, OutputTokens: 5, Status: "completed",
+					Tags: map[string]string{"feature": "search", "env": "prod"}},
 				{TS: base.Add(2 * time.Hour), UserEmail: "b@x.com", Model: "m2", InputTokens: 7, OutputTokens: 3, Status: "failed", CostUSD: 0.25, CacheStatus: "miss_tools_changed"},
 			}
 			for i := range events {
@@ -109,6 +110,21 @@ func TestStores(t *testing.T) {
 			}
 			if len(rows) != 1 || rows[0].Requests != 1 || rows[0].CostUSD != 0.25 {
 				t.Fatalf("cache status filter: %+v", rows)
+			}
+
+			rows, err = st.QueryUsage(ctx, UsageQuery{From: base.Add(-time.Hour), To: base.Add(3 * time.Hour), GroupBy: []string{"tag:feature"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 2 || rows[0].Group["tag:feature"] != "" || rows[0].Requests != 2 || rows[1].Group["tag:feature"] != "search" || rows[1].InputTokens != 50 {
+				t.Fatalf("group by tag: %+v", rows)
+			}
+			rows, err = st.QueryUsage(ctx, UsageQuery{From: base.Add(-time.Hour), To: base.Add(3 * time.Hour), GroupBy: []string{"model"}, Filters: map[string]string{"tag:env": "prod"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 || rows[0].Requests != 1 || rows[0].OutputTokens != 5 {
+				t.Fatalf("tag filter: %+v", rows)
 			}
 
 			in := &Insight{ID: openresponses.NewID("ins"), Kind: "error_rate", Severity: "warning", Status: "open", TenantID: ten.ID, AppID: app.ID,
@@ -192,6 +208,8 @@ func TestClickHouseRollup(t *testing.T) {
 		})
 	}
 	events[3].Status = "failed"
+	events[2].Tags = map[string]string{"feature": "search"}
+	events[3].Tags = map[string]string{"feature": "search", "env": "prod"}
 	if err := ch.InsertUsage(ctx, events); err != nil {
 		t.Fatal(err)
 	}
@@ -228,6 +246,13 @@ func TestClickHouseRollup(t *testing.T) {
 	}
 	if len(rows) != 2 || !rows[1].Bucket.Equal(base.Add(time.Hour)) || rows[1].FailedRequests != 1 {
 		t.Fatalf("hourly from rollup: %+v", rows)
+	}
+	rows, err = ch.QueryUsage(ctx, UsageQuery{From: base, To: base.Add(2 * time.Hour), GroupBy: []string{"tag:feature"}, Filters: map[string]string{"tag:env": "prod"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Group["tag:feature"] != "search" || rows[0].Requests != 1 {
+		t.Fatalf("tags from rollup: %+v", rows)
 	}
 }
 
