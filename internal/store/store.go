@@ -103,6 +103,9 @@ type UsageEvent struct {
 	// should have been cached, when the same prefix was sent recently.
 	CacheStatus          string
 	ExpectedCachedTokens int
+	// MissedCostUSD is what a cache miss cost over a hit: the expected
+	// cached tokens at the input price instead of the cached input price.
+	MissedCostUSD float64
 	// Tags are the caller's own labels from the X-Proxy-Tags header, such
 	// as feature=search. See ParseTags.
 	Tags map[string]string
@@ -175,6 +178,7 @@ type UsageRow struct {
 	ReasoningTokens   int64             `json:"reasoning_tokens"`
 	TotalTokens       int64             `json:"total_tokens"`
 	CostUSD           float64           `json:"cost_usd"`
+	MissedCostUSD     float64           `json:"missed_cost_usd"`
 }
 
 // Price is what a model costs, in USD per million tokens, from EffectiveFrom

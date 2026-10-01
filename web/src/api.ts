@@ -119,6 +119,8 @@ export interface UsageRow {
   reasoning_tokens: number;
   total_tokens: number;
   cost_usd: number;
+  // What cache misses that could have hit cost over hits.
+  missed_cost_usd: number;
 }
 
 export interface UsageParams {

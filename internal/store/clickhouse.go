@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS usage_events (
     expected_cached_tokens Int32,
     auth_method            LowCardinality(String),
     subject                String,
-    tags                   String
+    tags                   String,
+    missed_cost_usd        Float64
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMM(ts)
 ORDER BY (toDate(ts), tenant_id, app_id, ts)`
@@ -95,7 +96,8 @@ const clickhouseAddColumns = `
 ALTER TABLE usage_events
     ADD COLUMN IF NOT EXISTS auth_method LowCardinality(String),
     ADD COLUMN IF NOT EXISTS subject String,
-    ADD COLUMN IF NOT EXISTS tags String`
+    ADD COLUMN IF NOT EXISTS tags String,
+    ADD COLUMN IF NOT EXISTS missed_cost_usd Float64`
 
 // The hourly rollup has one row per hour and combination of the dimensions
 // usage can be grouped by. Background merges add rows with the same key
@@ -118,7 +120,8 @@ CREATE TABLE IF NOT EXISTS usage_hourly (
     cache_write_tokens  Int64,
     output_tokens       Int64,
     reasoning_tokens    Int64,
-    cost_usd            Float64
+    cost_usd            Float64,
+    missed_cost_usd     Float64
 ) ENGINE = SummingMergeTree
 PARTITION BY toYYYYMM(hour)
 ORDER BY (hour, tenant_id, app_id, user_email, model, provider, cache_status, tags)`
@@ -142,7 +145,8 @@ SELECT
     sum(toInt64(cache_write_tokens)) AS cache_write_tokens,
     sum(toInt64(output_tokens)) AS output_tokens,
     sum(toInt64(reasoning_tokens)) AS reasoning_tokens,
-    sum(cost_usd) AS cost_usd
+    sum(cost_usd) AS cost_usd,
+    sum(missed_cost_usd) AS missed_cost_usd
 FROM usage_events
 GROUP BY hour, tenant_id, app_id, user_email, model, provider, cache_status, tags`
 
@@ -186,9 +190,9 @@ func NewClickHouse(ctx context.Context, rawURL string, retentionDays int) (*Clic
 	return c, nil
 }
 
-// upgradeRollup adds tags to a rollup and view made before they existed. The
-// view is dropped and made again by the caller; inserts in between miss the
-// rollup, which only happens once, at the upgrade.
+// upgradeRollup adds columns to a rollup and view made before they existed.
+// The view is dropped and made again by the caller; inserts in between miss
+// the rollup, which only happens once per upgrade.
 func (c *ClickHouse) upgradeRollup(ctx context.Context) error {
 	cols, err := c.queryString(ctx, "SELECT name FROM system.columns WHERE database = {db:String} AND table = 'usage_hourly' AND name = 'tags'")
 	if err != nil {
@@ -199,11 +203,14 @@ func (c *ClickHouse) upgradeRollup(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := c.exec(ctx, "ALTER TABLE usage_hourly ADD COLUMN IF NOT EXISTS missed_cost_usd Float64", nil, c.db); err != nil {
+		return err
+	}
 	view, err := c.queryString(ctx, "SELECT create_table_query FROM system.tables WHERE database = {db:String} AND name = 'usage_hourly_mv'")
 	if err != nil {
 		return err
 	}
-	if view != "" && !strings.Contains(view, "tags") {
+	if view != "" && !strings.Contains(view, "missed_cost_usd") {
 		return c.exec(ctx, "DROP VIEW IF EXISTS usage_hourly_mv", nil, c.db)
 	}
 	return nil
@@ -321,6 +328,7 @@ type chUsageEvent struct {
 	AuthMethod           string  `json:"auth_method"`
 	Subject              string  `json:"subject"`
 	Tags                 string  `json:"tags"`
+	MissedCostUSD        float64 `json:"missed_cost_usd"`
 }
 
 func (c *ClickHouse) InsertUsage(ctx context.Context, events []UsageEvent) error {
@@ -339,7 +347,7 @@ func (c *ClickHouse) InsertUsage(ctx context.Context, events []UsageEvent) error
 			OutputTokens: e.OutputTokens, ReasoningTokens: e.ReasoningTokens, UsageReported: e.UsageReported,
 			LatencyMS: e.LatencyMS, TTFTMS: e.TTFTMS, PromptCacheKey: e.PromptCacheKey, CostUSD: e.CostUSD,
 			CacheStatus: e.CacheStatus, ExpectedCachedTokens: e.ExpectedCachedTokens, AuthMethod: e.AuthMethod, Subject: e.Subject,
-			Tags: FormatTags(e.Tags),
+			Tags: FormatTags(e.Tags), MissedCostUSD: e.MissedCostUSD,
 		}); err != nil {
 			return err
 		}
@@ -392,12 +400,12 @@ func (c *ClickHouse) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, 
 	filter := strings.Join(filters, "")
 	dims := "tenant_id, app_id, user_email, model, provider, cache_status, tags"
 	source := `SELECT toDateTime64(hour, 3, 'UTC') AS t, ` + dims + `, requests, failed_requests, input_tokens,
-		cached_input_tokens, cache_write_tokens, output_tokens, reasoning_tokens, cost_usd
+		cached_input_tokens, cache_write_tokens, output_tokens, reasoning_tokens, cost_usd, missed_cost_usd
 	FROM usage_hourly
 	WHERE hour >= {first:DateTime64(3, 'UTC')} AND hour < {last:DateTime64(3, 'UTC')}` + filter + `
 	UNION ALL
 	SELECT ts AS t, ` + dims + `, toUInt64(1), toUInt64(status = 'failed'), toInt64(input_tokens),
-		toInt64(cached_input_tokens), toInt64(cache_write_tokens), toInt64(output_tokens), toInt64(reasoning_tokens), cost_usd
+		toInt64(cached_input_tokens), toInt64(cache_write_tokens), toInt64(output_tokens), toInt64(reasoning_tokens), cost_usd, missed_cost_usd
 	FROM usage_events
 	WHERE ((ts >= {from:DateTime64(3, 'UTC')} AND ts < {first:DateTime64(3, 'UTC')})
 	    OR (ts >= {last:DateTime64(3, 'UTC')} AND ts < {to:DateTime64(3, 'UTC')}))` + filter
@@ -418,7 +426,7 @@ func (c *ClickHouse) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, 
 	}
 	sel = append(sel,
 		"sum(requests)", "sum(failed_requests)", "sum(input_tokens)", "sum(cached_input_tokens)",
-		"sum(cache_write_tokens)", "sum(output_tokens)", "sum(reasoning_tokens)", "sum(cost_usd)")
+		"sum(cache_write_tokens)", "sum(output_tokens)", "sum(reasoning_tokens)", "sum(cost_usd)", "sum(missed_cost_usd)")
 	sql := "SELECT " + strings.Join(sel, ", ") + " FROM (" + source + ")"
 	if len(group) > 0 {
 		sql += " GROUP BY " + strings.Join(group, ", ")
@@ -446,7 +454,7 @@ func (c *ClickHouse) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, 
 			dest = append(dest, &dims[i])
 		}
 		dest = append(dest, &r.Requests, &r.FailedRequests, &r.InputTokens, &r.CachedInputTokens,
-			&r.CacheWriteTokens, &r.OutputTokens, &r.ReasoningTokens, &r.CostUSD)
+			&r.CacheWriteTokens, &r.OutputTokens, &r.ReasoningTokens, &r.CostUSD, &r.MissedCostUSD)
 		if err := dec.Decode(&dest); err != nil {
 			return nil, fmt.Errorf("clickhouse: reading usage rows: %w", err)
 		}

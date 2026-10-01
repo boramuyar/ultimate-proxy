@@ -33,6 +33,10 @@ func UnstablePrefix(status string) bool {
 type Expectation struct {
 	MatchedTokens int    // tokens of the longest prefix seen within the TTL
 	Divergence    string // how this prompt differs from the scope's previous one
+	// LostTokens estimates what the provider would have served from cache
+	// had the prompt not diverged: the previous prompt's length, when it was
+	// sent within the TTL.
+	LostTokens int
 }
 
 type scopeKey struct {
@@ -54,11 +58,16 @@ type Tracker struct {
 
 	mu   sync.Mutex
 	seen map[scopeKey]time.Time
-	prev map[prevKey]*Fingerprint
+	prev map[prevKey]prevEntry
+}
+
+type prevEntry struct {
+	fp *Fingerprint
+	at time.Time
 }
 
 func NewTracker(ttl time.Duration, minTokens int) *Tracker {
-	return &Tracker{ttl: ttl, minTokens: minTokens, seen: map[scopeKey]time.Time{}, prev: map[prevKey]*Fingerprint{}}
+	return &Tracker{ttl: ttl, minTokens: minTokens, seen: map[scopeKey]time.Time{}, prev: map[prevKey]prevEntry{}}
 }
 
 // Before looks up a request's prefix at the time it is sent.
@@ -75,8 +84,11 @@ func (t *Tracker) Before(scope string, fp *Fingerprint, now time.Time) Expectati
 			break
 		}
 	}
-	if p := t.prev[prevKey{scope, fp.CacheKey}]; p != nil {
-		exp.Divergence = divergence(p, fp)
+	if p, ok := t.prev[prevKey{scope, fp.CacheKey}]; ok {
+		exp.Divergence = divergence(p.fp, fp)
+		if exp.Divergence != "" && now.Sub(p.at) <= t.ttl {
+			exp.LostTokens = min(p.fp.TotalTokens, fp.TotalTokens)
+		}
 	}
 	return exp
 }
@@ -91,7 +103,7 @@ func (t *Tracker) After(scope string, fp *Fingerprint, now time.Time) {
 	for _, h := range fp.Cumulative {
 		t.seen[scopeKey{scope, h}] = now
 	}
-	t.prev[prevKey{scope, fp.CacheKey}] = fp
+	t.prev[prevKey{scope, fp.CacheKey}] = prevEntry{fp, now}
 }
 
 // Prune forgets prefixes older than the TTL.
@@ -104,7 +116,7 @@ func (t *Tracker) Prune(now time.Time) {
 		}
 	}
 	if len(t.prev) > 100_000 {
-		t.prev = map[prevKey]*Fingerprint{}
+		t.prev = map[prevKey]prevEntry{}
 	}
 }
 
@@ -138,7 +150,9 @@ func divergence(prev, cur *Fingerprint) string {
 
 // Classify decides the cache status once the upstream reported how many
 // input tokens it served from cache. inputTokens is the upstream's count, or
-// 0 to fall back to the fingerprint's estimate.
+// 0 to fall back to the fingerprint's estimate. expected is how many tokens
+// should have come from cache: the matched prefix for a hit or an unexpected
+// miss, and for a prompt that diverged, an estimate of what the change cost.
 func (t *Tracker) Classify(fp *Fingerprint, exp Expectation, inputTokens, cachedTokens int) (status string, expected int) {
 	if inputTokens <= 0 {
 		inputTokens = fp.TotalTokens
@@ -153,6 +167,10 @@ func (t *Tracker) Classify(fp *Fingerprint, exp Expectation, inputTokens, cached
 	case exp.MatchedTokens >= t.minTokens:
 		return CacheUnexpectedMiss, exp.MatchedTokens
 	case exp.Divergence != "":
+		// The estimate counts bytes; the upstream's count is better.
+		if lost := min(exp.LostTokens, inputTokens); lost >= t.minTokens {
+			return exp.Divergence, lost
+		}
 		return exp.Divergence, 0
 	default:
 		return CacheNewPrefix, 0

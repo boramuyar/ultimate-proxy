@@ -59,6 +59,7 @@ ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS expected_cached_tokens integer
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS auth_method text NOT NULL DEFAULT '';
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS subject text NOT NULL DEFAULT '';
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS tags jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS missed_cost_usd double precision NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS insights (
     id          text PRIMARY KEY,

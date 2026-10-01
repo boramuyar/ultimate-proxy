@@ -61,6 +61,11 @@ func TestDynamicInstructionsRaiseInsight(t *testing.T) {
 	if got[insights.CacheNewPrefix] != 1 || got[insights.CacheInstructionsDyn] != 7 {
 		t.Fatalf("cache statuses %v", got)
 	}
+	for _, r := range rows {
+		if lost := r.MissedCostUSD; (r.Group["cache"] == insights.CacheInstructionsDyn) != (lost > 0) {
+			t.Fatalf("%s lost $%v", r.Group["cache"], lost)
+		}
+	}
 
 	h.srv.Insights().Evaluate(context.Background(), time.Now())
 	open := h.insights("open")
@@ -68,6 +73,9 @@ func TestDynamicInstructionsRaiseInsight(t *testing.T) {
 		t.Fatalf("open insights %+v", open)
 	}
 	in := open[0]
+	if usd, _ := in.Evidence["missed_savings_usd"].(float64); usd <= 0 {
+		t.Fatalf("evidence %v", in.Evidence)
+	}
 	if in.Severity != "critical" || in.Evidence["top_reason"] != insights.CacheInstructionsDyn || !strings.Contains(in.Detail, "timestamp") {
 		t.Fatalf("insight %+v", in)
 	}
@@ -117,6 +125,13 @@ func TestUnexpectedMissRaisesInsight(t *testing.T) {
 	rows := h.usage(store.UsageQuery{GroupBy: []string{"cache"}}, 7)
 	if got := cacheStatuses(rows); got[insights.CacheUnexpectedMiss] != 6 {
 		t.Fatalf("cache statuses %v", got)
+	}
+	var lost float64
+	for _, r := range rows {
+		lost += r.MissedCostUSD
+	}
+	if lost <= 0 {
+		t.Fatalf("no money lost: %+v", rows)
 	}
 	h.srv.Insights().Evaluate(context.Background(), time.Now())
 	open := h.insights("open")

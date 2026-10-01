@@ -156,12 +156,13 @@ func (s *Server) finish(x *exchange, firstToken time.Time, cache *cacheCheck) {
 		CacheWriteTokens: ev.CacheWriteTokens, OutputTokens: ev.OutputTokens,
 	})
 	ev.CostUSD = cost
-	var missedCost float64
 	if cache != nil && ev.UsageReported && ev.Status != "failed" {
 		ev.CacheStatus, ev.ExpectedCachedTokens = s.insights.Tracker.Classify(cache.fp, cache.exp, ev.InputTokens, ev.CachedInputTokens)
 		s.insights.Tracker.After(cache.scope, cache.fp, time.Now())
-		if ev.CacheStatus == insights.CacheUnexpectedMiss && priced {
-			missedCost = float64(ev.ExpectedCachedTokens) * s.prices.SavingsPerCachedToken(x.start, ev.Model, ev.Provider, ev.UpstreamModel)
+		// A miss the provider or the application could have avoided costs the
+		// tokens that should have been cached, at full price instead of cached.
+		if (ev.CacheStatus == insights.CacheUnexpectedMiss || insights.UnstablePrefix(ev.CacheStatus)) && priced {
+			ev.MissedCostUSD = float64(ev.ExpectedCachedTokens) * s.prices.SavingsPerCachedToken(x.start, ev.Model, ev.Provider, ev.UpstreamModel)
 		}
 	}
 
@@ -190,7 +191,7 @@ func (s *Server) finish(x *exchange, firstToken time.Time, cache *cacheCheck) {
 			TS: x.start, TenantID: id.TenantID, TenantName: id.TenantName,
 			AppID: id.AppID, AppName: id.AppName, Model: ev.Model,
 			Status: ev.Status, ErrorCode: ev.ErrorCode, CacheStatus: ev.CacheStatus,
-			ExpectedCachedTokens: ev.ExpectedCachedTokens, MissedCostUSD: missedCost,
+			ExpectedCachedTokens: ev.ExpectedCachedTokens, MissedCostUSD: ev.MissedCostUSD,
 		})
 	}
 }

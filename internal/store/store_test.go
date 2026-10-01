@@ -78,7 +78,7 @@ func TestStores(t *testing.T) {
 				{TS: base, UserEmail: "a@x.com", Model: "m1", InputTokens: 100, CachedInputTokens: 40, OutputTokens: 10, Status: "completed", TTFTMS: &ttft},
 				{TS: base.Add(time.Minute), UserEmail: "a@x.com", Model: "m1", InputTokens: 50, OutputTokens: 5, Status: "completed",
 					Tags: map[string]string{"feature": "search", "env": "prod"}},
-				{TS: base.Add(2 * time.Hour), UserEmail: "b@x.com", Model: "m2", InputTokens: 7, OutputTokens: 3, Status: "failed", CostUSD: 0.25, CacheStatus: "miss_tools_changed"},
+				{TS: base.Add(2 * time.Hour), UserEmail: "b@x.com", Model: "m2", InputTokens: 7, OutputTokens: 3, Status: "failed", CostUSD: 0.25, CacheStatus: "miss_tools_changed", MissedCostUSD: 0.125},
 			}
 			for i := range events {
 				events[i].RequestID = openresponses.NewID("resp")
@@ -108,7 +108,7 @@ func TestStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(rows) != 1 || rows[0].Requests != 1 || rows[0].CostUSD != 0.25 {
+			if len(rows) != 1 || rows[0].Requests != 1 || rows[0].CostUSD != 0.25 || rows[0].MissedCostUSD != 0.125 {
 				t.Fatalf("cache status filter: %+v", rows)
 			}
 
@@ -221,7 +221,7 @@ func TestClickHouseRollup(t *testing.T) {
 		events = append(events, UsageEvent{
 			TS: base.Add(time.Duration(10+30*i) * time.Minute), RequestID: openresponses.NewID("resp"),
 			TenantID: "t1", AppID: "a1", UserEmail: "a@x.com", Model: "m1", Status: "completed",
-			InputTokens: 100, OutputTokens: 10, CostUSD: 0.5,
+			InputTokens: 100, OutputTokens: 10, CostUSD: 0.5, MissedCostUSD: 0.25,
 		})
 	}
 	events[3].Status = "failed"
@@ -254,7 +254,7 @@ func TestClickHouseRollup(t *testing.T) {
 	if err := ch.exec(ctx, "TRUNCATE TABLE usage_events", nil, ch.db); err != nil {
 		t.Fatal(err)
 	}
-	if r := query(base, base.Add(2*time.Hour)); r.Requests != 4 || r.OutputTokens != 40 || r.TotalTokens != 440 {
+	if r := query(base, base.Add(2*time.Hour)); r.Requests != 4 || r.OutputTokens != 40 || r.TotalTokens != 440 || r.MissedCostUSD != 1 {
 		t.Fatalf("rollup only: %+v", r)
 	}
 	rows, err := ch.QueryUsage(ctx, UsageQuery{From: base, To: base.Add(2 * time.Hour), Granularity: "hour"})
