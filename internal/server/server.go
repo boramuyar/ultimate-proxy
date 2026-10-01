@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/boramuyar/ultimate-proxy/internal/pricing"
 	"github.com/boramuyar/ultimate-proxy/internal/provider"
 	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/boramuyar/ultimate-proxy/internal/tracing"
 )
 
 type Server struct {
@@ -36,12 +38,19 @@ type Server struct {
 	limits    *limits.Engine
 	// insights is nil when insights are disabled.
 	insights *insights.Engine
-	log      *slog.Logger
+	// tracer sends spans when tracing is configured, and does nothing otherwise.
+	tracer *tracing.Tracer
+	log    *slog.Logger
 }
 
 func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (*Server, error) {
 	s := &Server{cfg: cfg, adminAuth: adminauth.New(cfg.Admin, log), store: st, meter: m, providers: map[string]*provider.OpenAI{}, prices: pricing.New(st, log), log: log}
 	s.adminAuth.OnSignIn = s.auditSignIn
+	tr, err := tracing.New(cfg.Tracing)
+	if err != nil {
+		return nil, fmt.Errorf("tracing: %w", err)
+	}
+	s.tracer = tr
 	client := provider.NewHTTPClient(cfg.ResponseHeaderTimeout)
 	for _, p := range cfg.Providers {
 		s.providers[p.Name] = provider.NewOpenAI(p.Name, p.BaseURL, p.APIKey, p.Headers, client)
@@ -85,6 +94,10 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 	}
 	return s, nil
 }
+
+// Tracer returns the span exporter. Callers shut it down last, so the final
+// spans are sent.
+func (s *Server) Tracer() *tracing.Tracer { return s.tracer }
 
 // Prices returns the price table. Callers reload it at startup and keep it
 // fresh with Run.

@@ -327,6 +327,33 @@ Values are up to 100 characters of letters, digits and `_ - . : / @ +`. A malfor
 with `400 invalid_tags`. The hourly rollup keeps one row per distinct set of tags, so use tags for a
 handful of values each (features, environments, teams), not for request or user IDs.
 
+### Tracing
+
+The proxy can send an OpenTelemetry span for each model call to any backend that takes OTLP over
+HTTP (an OpenTelemetry Collector, Grafana Tempo, Jaeger, Honeycomb, Langfuse, Datadog). It's off
+until an endpoint is set:
+
+```yaml
+tracing:
+  endpoint: http://otel-collector:4318   # /v1/traces is added when the URL has no path
+  headers: {Authorization: "Bearer …"}   # optional
+  sample_ratio: 1                        # share of calls traced, 0 to 1
+  include_user: false                    # add user.email to spans
+```
+
+In the compose stack, set `TRACING_ENDPOINT` (and `TRACING_AUTHORIZATION` if the backend needs a
+key) in `.env`.
+
+When the caller sends a W3C `traceparent` header, the proxy's span joins the caller's trace, and the
+caller's sampling decision wins over `sample_ratio`. Spans are named `chat <model>` and carry the
+OpenTelemetry GenAI attributes (`gen_ai.provider.name`, `gen_ai.request.model`,
+`gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`,
+…) plus `ultimate_proxy.*` ones: tenant, application, status, cost in USD, cache status, money lost
+to a cache miss, the request ID (as in `X-Proxy-Request-Id`), time to first token, and each request tag as `ultimate_proxy.tag.<key>`.
+
+Spans never contain prompts or outputs. The end user's email is left out unless `include_user` is
+on, since tracing backends are often readable by more people than the dashboard.
+
 ## Rate limits
 
 Rules live in the database and apply to a tenant, one of its applications, or end users: `user` is an

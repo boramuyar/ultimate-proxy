@@ -18,6 +18,7 @@ import (
 	"github.com/boramuyar/ultimate-proxy/internal/provider"
 	"github.com/boramuyar/ultimate-proxy/internal/sse"
 	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // handleProvider serves /<provider>/v1/...: the provider's Responses and
@@ -62,6 +63,7 @@ type exchange struct {
 	p     *provider.OpenAI
 	dec   *limits.Decision
 	ev    store.UsageEvent
+	span  trace.Span
 }
 
 // admit authenticates a model call, reads its body and checks the model
@@ -114,6 +116,7 @@ func (s *Server) admit(w http.ResponseWriter, r *http.Request, p *provider.OpenA
 		x.ev.PromptCacheKey = *req.PromptCacheKey
 	}
 	w.Header().Set("X-Proxy-Request-Id", x.ev.RequestID)
+	x.span = s.tracer.Start(r, x.start, p.Name(), req.Model)
 
 	dec, limitErr := s.limits.Check(r.Context(), limitSubject(id.TenantID, id.AppID, email))
 	dec.Headers(w.Header())
@@ -130,6 +133,7 @@ func (s *Server) admit(w http.ResponseWriter, r *http.Request, p *provider.OpenA
 		x.ev.LatencyMS = int(time.Since(x.start).Milliseconds())
 		s.meter.Record(x.ev)
 		s.observe(&x.ev, id, time.Since(x.start))
+		s.tracer.End(x.span, &x.ev, id.TenantName, id.AppName)
 		return nil
 	}
 	return x
@@ -175,6 +179,7 @@ func (s *Server) finish(x *exchange, firstToken time.Time, cache *cacheCheck) {
 	}
 	s.meter.Record(*ev)
 	s.observe(ev, x.id, elapsed)
+	s.tracer.End(x.span, ev, x.id.TenantName, x.id.AppName)
 	// Charge token limits and budgets off the request path: the response
 	// only completes when the handler returns.
 	if n := ev.InputTokens + ev.OutputTokens; (n > 0 || ev.CostUSD > 0) && x.dec.Charges() {

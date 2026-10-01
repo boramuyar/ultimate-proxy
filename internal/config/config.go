@@ -46,7 +46,25 @@ type Config struct {
 
 	Providers []Provider `yaml:"providers"`
 	Insights  Insights   `yaml:"insights"`
+	Tracing   Tracing    `yaml:"tracing"`
 	Bootstrap []Tenant   `yaml:"bootstrap"`
+}
+
+// Tracing sends a span per model call over OTLP/HTTP. Off while Endpoint is
+// empty. Spans never hold prompts or completions.
+type Tracing struct {
+	// Endpoint is the collector's OTLP/HTTP URL, such as
+	// http://otel-collector:4318 (the /v1/traces path is added when absent).
+	Endpoint string `yaml:"endpoint"`
+	// Headers go with every export, for collectors that need a key.
+	Headers     map[string]string `yaml:"headers"`
+	ServiceName string            `yaml:"service_name"`
+	// SampleRatio is the share of calls traced, from 0 to 1 (default 1).
+	// A caller's own sampling decision, sent in traceparent, wins.
+	SampleRatio *float64 `yaml:"sample_ratio"`
+	// IncludeUser adds the end user's email to spans. Off by default, since
+	// tracing backends often have wider access than the proxy's dashboard.
+	IncludeUser bool `yaml:"include_user"`
 }
 
 // Limits configures rate limit enforcement. The rules themselves live in the
@@ -266,6 +284,13 @@ func (c *Config) applyDefaults() {
 		days := 90
 		c.Usage.RetentionDays = &days
 	}
+	if c.Tracing.ServiceName == "" {
+		c.Tracing.ServiceName = "ultimate-proxy"
+	}
+	if c.Tracing.SampleRatio == nil {
+		all := 1.0
+		c.Tracing.SampleRatio = &all
+	}
 	if c.Admin.Token == "" {
 		c.Admin.Token = c.AdminToken
 	}
@@ -357,6 +382,14 @@ func splitList(in []string, lower bool) []string {
 }
 
 func (c *Config) validate() error {
+	if t := c.Tracing; t.Endpoint != "" {
+		if u, err := url.Parse(t.Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("tracing.endpoint must be an http(s) URL, got %q", t.Endpoint)
+		}
+	}
+	if r := *c.Tracing.SampleRatio; r < 0 || r > 1 {
+		return fmt.Errorf("tracing.sample_ratio must be between 0 and 1, got %v", r)
+	}
 	if *c.Usage.RetentionDays < 0 {
 		return fmt.Errorf("usage.retention_days must be 0 (forever) or more")
 	}

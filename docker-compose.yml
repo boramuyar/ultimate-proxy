@@ -77,6 +77,8 @@ services:
       OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-}
       DEMO_APP_KEY: ${DEMO_APP_KEY:-up_demo_key}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TRACING_ENDPOINT: ${TRACING_ENDPOINT:-}
+      TRACING_AUTHORIZATION: ${TRACING_AUTHORIZATION:-}
     volumes: ["./deploy/compose/config.yaml:/etc/ultimate-proxy/config.yaml:ro"]
     healthcheck:
       test: ["CMD", "/usr/local/bin/ultimate-proxy", "-healthcheck", "http://127.0.0.1:8080/healthz"]

@@ -57,3 +57,11 @@ insights:
   # Alert on smaller traffic than the production default, so the demo
   # shows insights quickly.
   min_requests: 5
+
+# OpenTelemetry: a span per model call (model, tokens, cost, cache status;
+# never the prompt or output). Off while TRACING_ENDPOINT is empty. See
+# "Tracing" in the README.
+tracing:
+  endpoint: "${TRACING_ENDPOINT}"
+  headers:
+    Authorization: "${TRACING_AUTHORIZATION}"
