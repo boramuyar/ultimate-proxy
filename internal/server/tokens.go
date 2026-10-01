@@ -63,11 +63,7 @@ func (s *Server) mintToken(w http.ResponseWriter, r *http.Request) {
 			if m == "" {
 				continue
 			}
-			names := []string{m}
-			if rt, ok := s.router.Resolve(m); ok {
-				names = append(names, rt.QualifiedName())
-			}
-			if !covers(id.AllowedModels, names[0], names[1:]...) {
+			if !covers(id.AllowedModels, m) {
 				openresponses.WriteError(w, forbidden("model_not_allowed", "The minting credential may not use '"+m+"'.", "models"))
 				return
 			}
@@ -144,7 +140,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 	anyOrigin := slices.Contains(origins, "*")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" && strings.HasPrefix(r.URL.Path, "/v1/") && (anyOrigin || slices.Contains(origins, origin)) {
+		if origin != "" && apiPath(r.URL.Path) && (anyOrigin || slices.Contains(origins, origin)) {
 			h := w.Header()
 			h.Add("Vary", "Origin")
 			h.Set("Access-Control-Allow-Origin", origin)
@@ -157,4 +153,11 @@ func (s *Server) cors(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// apiPath reports whether a path is part of the client API: /v1/tokens or
+// /<provider>/v1/...
+func apiPath(path string) bool {
+	first, rest, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+	return first == "v1" || (first != "admin" && strings.HasPrefix(rest, "v1/"))
 }

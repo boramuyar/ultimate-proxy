@@ -195,7 +195,7 @@ function AppKeys({ app }: { app: Application }) {
           </div>
           <div className="grid min-w-56 flex-1 gap-1.5">
             <Label htmlFor={`models-${app.id}`}>Models</Label>
-            <Input id={`models-${app.id}`} placeholder="All models, or e.g. smart, openai/*" value={models} onChange={(e) => setModels(e.target.value)} />
+            <Input id={`models-${app.id}`} placeholder="All models, or e.g. gpt-5-mini, vllm/*" value={models} onChange={(e) => setModels(e.target.value)} />
           </div>
           <Button type="submit" size="sm">
             Create key

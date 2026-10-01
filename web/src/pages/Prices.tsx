@@ -116,7 +116,7 @@ function AddPrice({ onAdded }: { onAdded: () => void }) {
       <CardHeader className="flex-col items-stretch gap-1">
         <CardTitle>Add a price</CardTitle>
         <CardDescription>
-          Model is an alias (smart), an upstream model (gpt-5) or provider/model (openai/gpt-5). Cached input and cache write default to the input price.
+          Model is a model name (gpt-5), for every provider, or provider/model (openai/gpt-5) for one. Cached input and cache write default to the input price.
         </CardDescription>
       </CardHeader>
       <form onSubmit={submit} className="grid gap-3 px-5 pb-5">

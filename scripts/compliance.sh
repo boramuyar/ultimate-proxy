@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Runs the Open Responses compliance suite against the proxy, with the fake
-# upstream standing in for the provider: once through the Responses
-# passthrough and once through the Chat Completions translation.
+# upstream standing in for the provider.
 #
 #   scripts/compliance.sh <path to an openresponses/openresponses checkout>
 #
@@ -28,8 +27,5 @@ for _ in $(seq 50); do
 done
 
 (cd "$SPEC_DIR" && bun install --frozen-lockfile >/dev/null)
-for model in fake-gpt fake-chat; do
-  echo "== compliance: $model"
-  (cd "$SPEC_DIR" && bun run bin/compliance-test.ts \
-    --base-url http://localhost:8080/v1 --api-key up_ci_test_key --model "$model" --filter "$TESTS")
-done
+(cd "$SPEC_DIR" && bun run bin/compliance-test.ts \
+  --base-url http://localhost:8080/fake/v1 --api-key up_ci_test_key --model gpt-fake --filter "$TESTS")

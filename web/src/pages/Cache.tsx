@@ -20,7 +20,7 @@ const GROUPS = [
     statuses: ["miss_instructions_dynamic", "miss_instructions_changed", "miss_tools_reordered", "miss_tools_changed", "miss_history_rewritten"],
   },
   { key: "provider", label: "Provider missed", color: "var(--critical)", statuses: ["miss_unexpected"] },
-  { key: "expected", label: "Expected miss", color: "#d4d4d4", statuses: ["miss_new_prefix", "miss_too_short", "unknown", "rerouted"] },
+  { key: "expected", label: "Expected miss", color: "#d4d4d4", statuses: ["miss_new_prefix", "miss_too_short", "unknown"] },
 ];
 
 interface AppCache {

@@ -1,99 +1,112 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/go-json-experiment/json/jsontext"
-
 	"github.com/boramuyar/ultimate-proxy/internal/identity"
 	"github.com/boramuyar/ultimate-proxy/internal/insights"
+	"github.com/boramuyar/ultimate-proxy/internal/limits"
 	"github.com/boramuyar/ultimate-proxy/internal/metrics"
 	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
 	"github.com/boramuyar/ultimate-proxy/internal/pricing"
 	"github.com/boramuyar/ultimate-proxy/internal/provider"
-	"github.com/boramuyar/ultimate-proxy/internal/routing"
 	"github.com/boramuyar/ultimate-proxy/internal/sse"
 	"github.com/boramuyar/ultimate-proxy/internal/store"
 )
 
-// handleResponses serves POST /v1/responses.
-func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	ctx := r.Context()
-
-	id, apiErr := s.auth.Authenticate(ctx, r)
-	if apiErr != nil {
-		openresponses.WriteError(w, apiErr)
+// handleProvider serves /<provider>/v1/...: the provider's Responses and
+// Chat Completions APIs and its model list.
+func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
+	name, rest, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
+	p, ok := s.providers[name]
+	if !ok || !strings.HasPrefix(rest, "v1/") {
+		openresponses.WriteError(w, openresponses.NewError(http.StatusNotFound, openresponses.ErrInvalidRequest, "not_found",
+			"No such endpoint. Requests go to /<provider>/v1/..., where <provider> is a provider in the proxy's config.", ""))
 		return
+	}
+	switch op := r.Method + " " + strings.TrimPrefix(rest, "v1"); op {
+	case "POST /responses":
+		s.handleResponses(w, r, p)
+	case "POST /chat/completions":
+		s.handleChat(w, r, p)
+	case "POST /responses/compact":
+		s.handleCompact(w, r)
+	case "GET /models":
+		s.handleModels(w, r, p)
+	default:
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		openresponses.WriteError(w, openresponses.NewError(http.StatusNotFound, openresponses.ErrInvalidRequest, "not_found",
+			"The proxy does not serve "+r.Method+" /"+name+"/"+rest+".", ""))
+	}
+}
+
+// exchange is one model call through the proxy, from the caller's request to
+// its usage event.
+type exchange struct {
+	start time.Time
+	id    *identity.Identity
+	req   *openresponses.Envelope
+	p     *provider.OpenAI
+	dec   *limits.Decision
+	ev    store.UsageEvent
+}
+
+// admit authenticates a model call, reads its body and checks the model
+// allowlist and the limits. On refusal it answers the caller, logs a
+// rejected request when limits refused it, and returns nil.
+func (s *Server) admit(w http.ResponseWriter, r *http.Request, p *provider.OpenAI) *exchange {
+	x := &exchange{start: time.Now(), p: p}
+	var apiErr *openresponses.APIError
+	if x.id, apiErr = s.auth.Authenticate(r.Context(), r); apiErr != nil {
+		openresponses.WriteError(w, apiErr)
+		return nil
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, s.cfg.MaxRequestBytes))
 	if err != nil {
 		openresponses.WriteError(w, openresponses.NewError(http.StatusRequestEntityTooLarge, openresponses.ErrInvalidRequest, "request_too_large", err.Error(), ""))
-		return
+		return nil
 	}
 	// One pass over the body; the prompt itself is never decoded.
-	req, apiErr := openresponses.ParseEnvelope(body)
-	if apiErr != nil {
+	if x.req, apiErr = openresponses.ParseEnvelope(body); apiErr != nil {
 		openresponses.WriteError(w, apiErr)
-		return
+		return nil
 	}
+	req, id := x.req, x.id
 	if req.Model == "" {
 		openresponses.WriteError(w, openresponses.InvalidRequest("missing_required_parameter", "model is required.", "model"))
-		return
+		return nil
 	}
 	if req.Background {
 		openresponses.WriteError(w, openresponses.InvalidRequest("unsupported_parameter", "background responses are not supported yet.", "background"))
-		return
+		return nil
 	}
-	plan, ok := s.router.Plan(req.Model)
-	if !ok {
-		openresponses.WriteError(w, openresponses.InvalidRequest("model_not_found", "The requested model '"+req.Model+"' does not exist.", "model"))
-		return
-	}
-	primary := plan[0]
-	if !id.AllowsModel(req.Model, primary.QualifiedName()) {
+	if !id.AllowsModel(req.Model, x.qualified()) {
 		openresponses.WriteError(w, errModelNotAllowed(req.Model))
-		return
+		return nil
 	}
-	// Fallbacks the caller may not use are skipped.
-	plan = slices.DeleteFunc(plan[1:], func(t routing.Target) bool {
-		return !id.AllowsModel(t.Name, t.QualifiedName())
-	})
-	plan = append([]routing.Target{primary}, plan...)
-
-	// Fingerprint the prompt prefix and note what the cache should hold for
-	// it. Caches are per upstream model, so that is the scope, per application.
-	var (
-		fp         *insights.Fingerprint
-		exp        insights.Expectation
-		cacheScope string
-	)
-	if s.insights != nil {
-		fp = insights.FromEnvelope(req)
-		cacheScope = id.AppID + "\x00" + primary.QualifiedName()
-		exp = s.insights.Tracker.Before(cacheScope, fp, start)
-	}
-
 	email, source := identity.ResolveUser(id, r, req)
-	call := &provider.Call{
-		Env:        req,
-		Model:      req.Model,
-		ResponseID: openresponses.NewID("resp"),
-		CreatedAt:  start.Unix(),
+	x.ev = store.UsageEvent{
+		TS: x.start.UTC(), RequestID: openresponses.NewID("resp"), TenantID: id.TenantID, AppID: id.AppID, KeyID: id.KeyID(),
+		AuthMethod: id.Method, Subject: id.Subject, UserEmail: email, UserSource: source,
+		Model: req.Model, Provider: p.Name(), UpstreamModel: req.Model, Stream: req.Stream, HTTPStatus: http.StatusOK,
 	}
-	w.Header().Set("X-Proxy-Request-Id", call.ResponseID)
+	if req.PromptCacheKey != nil {
+		x.ev.PromptCacheKey = *req.PromptCacheKey
+	}
+	w.Header().Set("X-Proxy-Request-Id", x.ev.RequestID)
 
-	dec, limitErr := s.limits.Check(ctx, limitSubject(id.TenantID, id.AppID, email))
+	dec, limitErr := s.limits.Check(r.Context(), limitSubject(id.TenantID, id.AppID, email))
 	dec.Headers(w.Header())
+	x.dec = dec
 	if !dec.Allowed {
 		ae := openresponses.NewError(http.StatusTooManyRequests, openresponses.ErrTooManyRequests, dec.Code(), dec.Message(), "")
 		if limitErr != nil {
@@ -102,16 +115,98 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		openresponses.WriteError(w, ae)
 		// Refused requests are logged too, with no tokens, so they show up
 		// in usage.
-		ev := store.UsageEvent{
-			TS: start.UTC(), RequestID: call.ResponseID, TenantID: id.TenantID, AppID: id.AppID, KeyID: id.KeyID(),
-			AuthMethod: id.Method, Subject: id.Subject, UserEmail: email, UserSource: source, Model: req.Model,
-			Provider: primary.Pool.Name, UpstreamModel: primary.UpstreamModel, Stream: req.Stream,
-			Status: "rejected", ErrorCode: ae.CodeString(), HTTPStatus: ae.Status,
-			LatencyMS: int(time.Since(start).Milliseconds()),
+		x.ev.Status, x.ev.ErrorCode, x.ev.HTTPStatus = "rejected", ae.CodeString(), ae.Status
+		x.ev.LatencyMS = int(time.Since(x.start).Milliseconds())
+		s.meter.Record(x.ev)
+		s.observe(&x.ev, id, time.Since(x.start))
+		return nil
+	}
+	return x
+}
+
+// qualified is "<provider>/<model>", as model allowlists may name it.
+func (x *exchange) qualified() string { return x.p.Name() + "/" + x.req.Model }
+
+func (x *exchange) setUsage(u provider.Usage) {
+	x.ev.InputTokens = u.InputTokens
+	x.ev.CachedInputTokens = u.CachedInputTokens
+	x.ev.CacheWriteTokens = u.CacheWriteTokens
+	x.ev.OutputTokens = u.OutputTokens
+	x.ev.ReasoningTokens = u.ReasoningTokens
+	x.ev.UsageReported = u.Reported
+}
+
+// finish prices the call, logs its usage event and charges its limits.
+// firstToken is when the first output reached a streaming client, if known.
+func (s *Server) finish(x *exchange, firstToken time.Time, cache *cacheCheck) {
+	ev := &x.ev
+	cost, priced := s.prices.Cost(x.start, ev.Model, ev.Provider, ev.UpstreamModel, pricing.Usage{
+		InputTokens: ev.InputTokens, CachedInputTokens: ev.CachedInputTokens,
+		CacheWriteTokens: ev.CacheWriteTokens, OutputTokens: ev.OutputTokens,
+	})
+	ev.CostUSD = cost
+	var missedCost float64
+	if cache != nil && ev.UsageReported && ev.Status != "failed" {
+		ev.CacheStatus, ev.ExpectedCachedTokens = s.insights.Tracker.Classify(cache.fp, cache.exp, ev.InputTokens, ev.CachedInputTokens)
+		s.insights.Tracker.After(cache.scope, cache.fp, time.Now())
+		if ev.CacheStatus == insights.CacheUnexpectedMiss && priced {
+			missedCost = float64(ev.ExpectedCachedTokens) * s.prices.SavingsPerCachedToken(x.start, ev.Model, ev.Provider, ev.UpstreamModel)
 		}
-		s.meter.Record(ev)
-		s.observe(&ev, id, time.Since(start))
+	}
+
+	elapsed := time.Since(x.start)
+	ev.LatencyMS = int(elapsed.Milliseconds())
+	if !firstToken.IsZero() {
+		ms := int(firstToken.Sub(x.start).Milliseconds())
+		ev.TTFTMS = &ms
+		metrics.TTFT.WithLabelValues(ev.Provider, ev.Model).Observe(firstToken.Sub(x.start).Seconds())
+	}
+	s.meter.Record(*ev)
+	s.observe(ev, x.id, elapsed)
+	// Charge token limits and budgets off the request path: the response
+	// only completes when the handler returns.
+	if n := ev.InputTokens + ev.OutputTokens; (n > 0 || ev.CostUSD > 0) && x.dec.Charges() {
+		dec, usd := x.dec, ev.CostUSD
+		go func() {
+			cctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			s.limits.Charge(cctx, dec, n, usd)
+		}()
+	}
+	if s.insights != nil {
+		id := x.id
+		s.insights.Record(insights.Observation{
+			TS: x.start, TenantID: id.TenantID, TenantName: id.TenantName,
+			AppID: id.AppID, AppName: id.AppName, Model: ev.Model,
+			Status: ev.Status, ErrorCode: ev.ErrorCode, CacheStatus: ev.CacheStatus,
+			ExpectedCachedTokens: ev.ExpectedCachedTokens, MissedCostUSD: missedCost,
+		})
+	}
+}
+
+// cacheCheck is the prompt prefix fingerprint taken before a call, and what
+// the cache was expected to hold for it.
+type cacheCheck struct {
+	fp    *insights.Fingerprint
+	exp   insights.Expectation
+	scope string
+}
+
+// handleResponses serves POST /<provider>/v1/responses.
+func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request, p *provider.OpenAI) {
+	ctx := r.Context()
+	x := s.admit(w, r, p)
+	if x == nil {
 		return
+	}
+	req := x.req
+
+	// Fingerprint the prompt prefix and note what the cache should hold for
+	// it. Caches are per upstream model, so that is the scope, per application.
+	var cache *cacheCheck
+	if s.insights != nil {
+		cache = &cacheCheck{fp: insights.FromEnvelope(req), scope: x.id.AppID + "\x00" + x.qualified()}
+		cache.exp = s.insights.Tracker.Before(cache.scope, cache.fp, x.start)
 	}
 
 	var (
@@ -124,77 +219,14 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		ts = &timingSink{inner: sw}
 		sink = ts
 	}
+	call := &provider.Call{Env: req, Model: req.Model, ResponseID: x.ev.RequestID, CreatedAt: x.start.Unix()}
+	res, err := p.Create(ctx, call, sink)
 
-	// Retries happen only before anything reaches the client: adapters
-	// report a *provider.Failure only when they sent no event.
-	// Send the conversation where its prompt prefix is cached: the
-	// deployment that produced previous_response_id, or that served the
-	// session last.
-	var (
-		session string
-		prefer  *routing.Deployment
-	)
-	if primary.Spread() {
-		if req.PreviousResponseID != nil && *req.PreviousResponseID != "" {
-			prefer = s.router.Sticky(responseKey(*req.PreviousResponseID))
-		} else if session = sessionKey(id.AppID, req.Model, r, req); session != "" {
-			prefer = s.router.Sticky(session)
-		}
-	}
-	res, out, err := s.router.Run(ctx, routing.Request{Plan: plan, Pinned: pinnedToUpstream(req), Prefer: prefer}, func(a routing.Attempt) (*provider.Result, error) {
-		call.UpstreamModel = a.Target.UpstreamModel
-		return a.Deployment.Adapter.Create(ctx, call, sink)
-	})
-	served := out.Target
-	rerouted := prefer != nil && out.Deployment != prefer
-	if err == nil && served.Spread() {
-		if session != "" {
-			s.router.Stick(session, out.Deployment, false)
-		}
-		// Responses stored upstream can only be continued where they were
-		// made, whatever the stickiness setting.
-		if rid := responseID(res.Response); rid != "" {
-			s.router.Stick(responseKey(rid), out.Deployment, true)
-		}
-	}
-	// Price what actually served the request.
-	priceModel := req.Model
-	if served != primary {
-		priceModel = served.Name
-	}
-
-	ev := store.UsageEvent{
-		TS:            start.UTC(),
-		RequestID:     call.ResponseID,
-		TenantID:      id.TenantID,
-		AppID:         id.AppID,
-		KeyID:         id.KeyID(),
-		AuthMethod:    id.Method,
-		Subject:       id.Subject,
-		UserEmail:     email,
-		UserSource:    source,
-		Model:         req.Model,
-		Provider:      served.Pool.Name,
-		UpstreamModel: served.UpstreamModel,
-		Deployment:    out.Deployment.Name,
-		Attempts:      out.Attempts,
-		Stream:        req.Stream,
-		HTTPStatus:    http.StatusOK,
-	}
-	if req.PromptCacheKey != nil {
-		ev.PromptCacheKey = *req.PromptCacheKey
-	}
+	ev := &x.ev
 	if res != nil {
-		ev.Status = res.Status
-		ev.ErrorCode = res.ErrorCode
-		ev.InputTokens = res.Usage.InputTokens
-		ev.CachedInputTokens = res.Usage.CachedInputTokens
-		ev.CacheWriteTokens = res.Usage.CacheWriteTokens
-		ev.OutputTokens = res.Usage.OutputTokens
-		ev.ReasoningTokens = res.Usage.ReasoningTokens
-		ev.UsageReported = res.Usage.Reported
+		ev.Status, ev.ErrorCode = res.Status, res.ErrorCode
+		x.setUsage(res.Usage)
 	}
-
 	switch {
 	case err != nil:
 		ev.Status = "failed"
@@ -225,52 +257,11 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(res.Response)
 	}
-
-	cost, priced := s.prices.Cost(start, priceModel, ev.Provider, ev.UpstreamModel, pricing.Usage{
-		InputTokens: ev.InputTokens, CachedInputTokens: ev.CachedInputTokens,
-		CacheWriteTokens: ev.CacheWriteTokens, OutputTokens: ev.OutputTokens,
-	})
-	ev.CostUSD = cost
-	var missedCost float64
-	// The cache scope is the requested model's; a fallback has its own cache.
-	if fp != nil && ev.UsageReported && ev.Status != "failed" && served == primary {
-		ev.CacheStatus, ev.ExpectedCachedTokens = s.insights.Tracker.Classify(fp, exp, ev.InputTokens, ev.CachedInputTokens)
-		if rerouted && ev.CacheStatus != insights.CacheHit {
-			// The deployment that had it cached was unavailable.
-			ev.CacheStatus, ev.ExpectedCachedTokens = insights.CacheRerouted, 0
-		}
-		s.insights.Tracker.After(cacheScope, fp, time.Now())
-		if ev.CacheStatus == insights.CacheUnexpectedMiss && priced {
-			missedCost = float64(ev.ExpectedCachedTokens) * s.prices.SavingsPerCachedToken(start, priceModel, ev.Provider, ev.UpstreamModel)
-		}
+	var first time.Time
+	if ts != nil {
+		first = ts.first
 	}
-
-	elapsed := time.Since(start)
-	ev.LatencyMS = int(elapsed.Milliseconds())
-	if ts != nil && !ts.first.IsZero() {
-		ms := int(ts.first.Sub(start).Milliseconds())
-		ev.TTFTMS = &ms
-		metrics.TTFT.WithLabelValues(ev.Provider, ev.Model).Observe(ts.first.Sub(start).Seconds())
-	}
-	s.meter.Record(ev)
-	s.observe(&ev, id, elapsed)
-	// Charge token limits and budgets off the request path: the response
-	// only completes when the handler returns.
-	if n := ev.InputTokens + ev.OutputTokens; (n > 0 || ev.CostUSD > 0) && dec.Charges() {
-		go func() {
-			cctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			s.limits.Charge(cctx, dec, n, ev.CostUSD)
-		}()
-	}
-	if s.insights != nil {
-		s.insights.Record(insights.Observation{
-			TS: start, TenantID: id.TenantID, TenantName: id.TenantName,
-			AppID: id.AppID, AppName: id.AppName, Model: ev.Model,
-			Status: ev.Status, ErrorCode: ev.ErrorCode, CacheStatus: ev.CacheStatus,
-			ExpectedCachedTokens: ev.ExpectedCachedTokens, MissedCostUSD: missedCost,
-		})
-	}
+	s.finish(x, first, cache)
 }
 
 func (s *Server) observe(ev *store.UsageEvent, p *identity.Identity, elapsed time.Duration) {
@@ -322,7 +313,8 @@ func (t *timingSink) RawEvent(typ string, data []byte) error {
 	return t.inner.RawEvent(typ, data)
 }
 
-// handleCompact serves POST /v1/responses/compact, which is not built yet.
+// handleCompact serves POST /<provider>/v1/responses/compact, which is not
+// built yet.
 func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 	if _, apiErr := s.auth.Authenticate(r.Context(), r); apiErr != nil {
 		openresponses.WriteError(w, apiErr)
@@ -331,24 +323,28 @@ func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 	openresponses.WriteError(w, openresponses.NewError(http.StatusNotImplemented, openresponses.ErrServer, "not_implemented", "/v1/responses/compact is not supported yet.", ""))
 }
 
-func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	id, apiErr := s.auth.Authenticate(r.Context(), r)
-	if apiErr != nil {
+// handleModels serves GET /<provider>/v1/models: the provider's own list,
+// passed through.
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request, p *provider.OpenAI) {
+	if _, apiErr := s.auth.Authenticate(r.Context(), r); apiErr != nil {
 		openresponses.WriteError(w, apiErr)
 		return
 	}
-	type model struct {
-		ID     string `json:"id"`
-		Object string `json:"object"`
-	}
-	data := []model{}
-	for _, m := range s.router.Models() {
-		if rt, _ := s.router.Resolve(m); !id.AllowsModel(m, rt.QualifiedName()) {
-			continue
+	resp, err := p.Get(r.Context(), "/models")
+	if err != nil {
+		var ae *openresponses.APIError
+		if !errors.As(err, &ae) {
+			ae = openresponses.ServerError("proxy_error", err.Error())
 		}
-		data = append(data, model{ID: m, Object: "model"})
+		openresponses.WriteError(w, ae)
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
 }
 
 func errModelNotAllowed(model string) *openresponses.APIError {
@@ -360,89 +356,4 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
-}
-
-// pinnedToUpstream reports whether the request carries state that belongs to
-// the upstream account that made it, so it must not move to another provider.
-func pinnedToUpstream(req *openresponses.Envelope) bool {
-	if req.PreviousResponseID != nil && *req.PreviousResponseID != "" {
-		return true
-	}
-	for _, it := range req.InputItems {
-		if bytes.Contains(it, []byte(`"encrypted_content"`)) && !bytes.Contains(it, []byte(`"encrypted_content":null`)) {
-			return true
-		}
-	}
-	return false
-}
-
-// SessionHeader lets a client name its conversation, so its turns stick to
-// one deployment.
-const SessionHeader = "X-Proxy-Session-Id"
-
-// sessionKey identifies the conversation a request continues, per
-// application and model: the X-Proxy-Session-Id header, prompt_cache_key,
-// or else a hash of the instructions and the input up to the first user
-// message, which every later turn repeats. A bare string input is a single
-// turn, so it has none.
-func sessionKey(appID, model string, r *http.Request, req *openresponses.Envelope) string {
-	base := appID + "\x00" + model + "\x00"
-	if v := r.Header.Get(SessionHeader); v != "" {
-		return base + "h\x00" + v
-	}
-	if req.PromptCacheKey != nil && *req.PromptCacheKey != "" {
-		return base + "k\x00" + *req.PromptCacheKey
-	}
-	if len(req.InputItems) == 0 {
-		return ""
-	}
-	h := sha256.New()
-	h.Write(req.Instructions)
-	for _, it := range req.InputItems {
-		h.Write([]byte{0})
-		h.Write(it)
-		if itemRole(it) == "user" {
-			break
-		}
-	}
-	return base + "c\x00" + string(h.Sum(nil))
-}
-
-func responseKey(id string) string { return "resp\x00" + id }
-
-// responseID reads the id of a final response.
-func responseID(raw json.RawMessage) string {
-	var r struct {
-		ID string `json:"id"`
-	}
-	if json.Unmarshal(raw, &r) != nil {
-		return ""
-	}
-	return r.ID
-}
-
-// itemRole reads an input item's role without decoding its content.
-func itemRole(item []byte) string {
-	d := jsontext.NewDecoder(bytes.NewReader(item))
-	if tok, err := d.ReadToken(); err != nil || tok.Kind() != '{' {
-		return ""
-	}
-	for d.PeekKind() == '"' {
-		key, err := d.ReadToken()
-		if err != nil {
-			return ""
-		}
-		if key.String() != "role" {
-			if d.SkipValue() != nil {
-				return ""
-			}
-			continue
-		}
-		v, err := d.ReadToken()
-		if err != nil || v.Kind() != '"' {
-			return ""
-		}
-		return v.String()
-	}
-	return ""
 }

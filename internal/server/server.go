@@ -18,7 +18,7 @@ import (
 	"github.com/boramuyar/ultimate-proxy/internal/meter"
 	"github.com/boramuyar/ultimate-proxy/internal/metrics"
 	"github.com/boramuyar/ultimate-proxy/internal/pricing"
-	"github.com/boramuyar/ultimate-proxy/internal/routing"
+	"github.com/boramuyar/ultimate-proxy/internal/provider"
 	"github.com/boramuyar/ultimate-proxy/internal/store"
 )
 
@@ -30,7 +30,8 @@ type Server struct {
 	apiKeys   *identity.APIKeys
 	tokens    *identity.ProxyTokens
 	meter     *meter.Meter
-	router    *routing.Router
+	// providers are the upstreams, by the name clients use in the path.
+	providers map[string]*provider.OpenAI
 	prices    *pricing.Table
 	limits    *limits.Engine
 	// insights is nil when insights are disabled.
@@ -39,11 +40,11 @@ type Server struct {
 }
 
 func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (*Server, error) {
-	router, err := routing.New(cfg, log)
-	if err != nil {
-		return nil, err
+	s := &Server{cfg: cfg, adminAuth: adminauth.New(cfg.Admin, log), store: st, meter: m, providers: map[string]*provider.OpenAI{}, prices: pricing.New(st, log), log: log}
+	client := provider.NewHTTPClient(cfg.ResponseHeaderTimeout)
+	for _, p := range cfg.Providers {
+		s.providers[p.Name] = provider.NewOpenAI(p.Name, p.BaseURL, p.APIKey, p.Headers, client)
 	}
-	s := &Server{cfg: cfg, adminAuth: adminauth.New(cfg.Admin, log), store: st, meter: m, router: router, prices: pricing.New(st, log), log: log}
 	// JWTs go first: API keys accept any token, since keys in the config
 	// need not carry the up_ prefix.
 	if len(cfg.Auth.JWT) > 0 {
@@ -97,11 +98,10 @@ func (s *Server) Insights() *insights.Engine { return s.insights }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/responses", s.handleResponses)
-	mux.HandleFunc("POST /v1/responses/compact", s.handleCompact)
-	mux.HandleFunc("GET /v1/models", s.handleModels)
 	mux.HandleFunc("POST /v1/tokens", s.mintToken)
 	mux.HandleFunc("OPTIONS /v1/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	// Everything else under /<provider>/v1/ goes to that provider.
+	mux.HandleFunc("/", s.handleProvider)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.Handle("GET /metrics", promhttp.HandlerFor(metrics.Registry, promhttp.HandlerOpts{}))
 

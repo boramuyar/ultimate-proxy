@@ -1,27 +1,32 @@
 # Ultimate Proxy
 
-A fast, self-hosted LLM gateway that speaks the [Open Responses](https://www.openresponses.org/) API
-and meters every request by **tenant**, **application** and **end-user email**.
+A fast, self-hosted LLM gateway: a pass-through proxy for OpenAI-compatible APIs
+([Responses](https://www.openresponses.org/) and Chat Completions) that controls and meters every
+request by **tenant**, **application** and **end-user email**.
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
 
-## What works today (phases 1 and 2)
+## What it does
 
-- `POST /v1/responses`: JSON and SSE streaming, passing the Open Responses HTTP compliance tests.
-- Upstreams: any provider that speaks Open Responses (OpenAI's Responses API and compatible servers),
-  relayed as-is (the proxy only reads the final usage), and any server that only speaks Chat
-  Completions (vLLM, Ollama, llama.cpp, LiteLLM, Groq, Together, OpenRouter and others), translated
-  with provider `type: chat_completions`.
-  Translation covers text, images, files as data, function tools and `tool_choice`, structured
-  output (`text.format`), reasoning effort and streamed reasoning, and cached-token usage. It
-  rejects with a 400 what Chat Completions cannot express: `previous_response_id`, hosted tools and
-  item references. The output limit is sent as `max_tokens`, which every such server accepts.
-- Several keys or servers per provider, retries, circuit breakers and fallback models, with each
-  conversation kept on the deployment that has it cached (see "Retries, fallbacks and several keys").
+The proxy passes requests through to OpenAI-compatible providers unchanged, and adds control
+(who may call, which models, how much) and accounting (tokens, cost, cache health) on the way.
+Each provider in the config is reached under its own name:
+
+| Endpoint | |
+| --- | --- |
+| `POST /<provider>/v1/responses` | The Responses API, JSON and SSE streaming. Passes the Open Responses HTTP compliance tests. |
+| `POST /<provider>/v1/chat/completions` | Chat Completions, JSON and SSE streaming. |
+| `GET /<provider>/v1/models` | The provider's own model list. |
+
+So an OpenAI SDK only needs its base URL set to `http://proxy:8080/openai/v1`. The model in the body
+goes to the provider as it is. Any provider that speaks the OpenAI API works: OpenAI, vLLM, Ollama,
+llama.cpp, Groq, Together, OpenRouter and others. The proxy does not translate between APIs, retry,
+or fall back to other models: an upstream error reaches the caller as the upstream sent it.
+
 - API keys that expire and are limited to some models, and short-lived tokens for agents on users'
   devices.
-- Rate limits per tenant, application or end user, in requests or tokens per minute, shared across
-  replicas through Valkey (see "Rate limits").
+- Rate limits per tenant, application or end user, in requests or tokens per minute, and spend or
+  token budgets per day, week or month, shared across replicas through Valkey (see "Rate limits").
 - Callers authenticate with the proxy's own API keys (one per application and tenant), with access
   tokens from your own identity provider (see "Using your own identity provider"), or both.
 - End-user attribution from the `X-Proxy-User-Email` header, `metadata.user_email` or `safety_identifier`,
@@ -30,19 +35,19 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
   ClickHouse in batches, off the request path. Tenants, keys, prices and insights stay in Postgres.
 - `GET /admin/usage` to answer "who used how many tokens", grouped by tenant, application, email, model
   or provider, optionally bucketed by hour or day.
-- Prompt-cache diagnosis on every request: whether the cache hit, and if not, why (see below).
+- Prompt-cache diagnosis on every Responses request: whether the cache hit, and if not, why (see
+  below). Chat Completions requests record cached tokens but are not diagnosed yet.
 - Insights: problems the proxy notices in live traffic, per application and model, listed at
   `GET /admin/insights` and posted to a webhook or Slack when they open and resolve.
 - Cost in USD from a versioned prices table, on every usage event and in `/admin/usage`.
 - Prometheus metrics at `/metrics`.
 
-Not built yet: WebSocket transport, `/v1/responses/compact` and background responses. They are
-later phases in the design doc.
+Not built yet: WebSocket transport, `/responses/compact` and background responses.
 
 ## Run it
 
-Everything runs with Docker Compose: the proxy, Postgres, ClickHouse, the dashboard, and a free fake model
-(`fake-gpt`) to try things without a provider key.
+Everything runs with Docker Compose: the proxy, Postgres, ClickHouse, Valkey, the dashboard, and a free
+fake provider (`fake`, any model name) to try things without a provider key.
 
 ```sh
 cp .env.example .env        # optional: change the admin token, add OPENAI_API_KEY
@@ -55,8 +60,8 @@ scripts/demo-traffic.sh     # optional: sample tenants, traffic and cache proble
 | Dashboard | http://localhost:3000, sign in with your identity provider (see [Signing in](#signing-in)) or `PROXY_ADMIN_TOKEN` (default `dev-admin-token`) |
 | Proxy API | http://localhost:8080, demo key `up_demo_key` for the `demo/playground` application |
 
-The proxy config for the stack is `deploy/compose/config.yaml`: models `fake-gpt` (free), `smart` and
-`fast` (OpenAI, once `OPENAI_API_KEY` is set). Tenants, keys and prices live in the `pgdata` volume and the
+The proxy config for the stack is `deploy/compose/config.yaml`: providers `fake` (free, at
+`/fake/v1/...`) and `openai` (at `/openai/v1/...`, once `OPENAI_API_KEY` is set). Tenants, keys and prices live in the `pgdata` volume and the
 request log in the `chdata` volume; `docker compose down -v` wipes both. `POSTGRES_PASSWORD` and
 `CLICKHOUSE_PASSWORD` only apply when their volume is first created.
 
@@ -157,7 +162,7 @@ auth:
         groups: groups           # default: groups
         models: llm_models       # optional: a claim listing the models the caller may use
       group_models:              # optional: models per group, for providers without a custom claim
-        ml-team: [smart, openai/*]
+        ml-team: [gpt-5, vllm/*]
 ```
 
 The proxy fetches the issuer's signing keys from its discovery document (or `jwks_url`) and checks
@@ -166,9 +171,9 @@ EdDSA) are accepted. A verified token is cached until it expires, for at most fi
 only the first request with a token pays for the signature check. List several issuers to serve
 several organizations, for example one per Keycloak realm.
 
-Allowed models are names or `<provider>/<model>`, optionally ending in `*`. A request for any
-other model gets `403 model_not_allowed`, and `GET /v1/models` lists only the allowed ones. When
-neither `claims.models` nor `group_models` is set, every model is allowed.
+Allowed models are model names (any provider) or `<provider>/<model>`, optionally ending in `*`. A
+request for any other model gets `403 model_not_allowed`. When neither `claims.models` nor
+`group_models` is set, every model is allowed.
 
 With Keycloak, add an *Audience* mapper to the client so its access tokens carry
 `aud: ultimate-proxy`, and a *Group Membership* mapper (with "Full group path" off) for `groups`.
@@ -189,8 +194,8 @@ ways to give it a credential that expires in minutes:
 
   ```sh
   curl -s localhost:8080/v1/tokens -H "Authorization: Bearer up_…" \
-    -d '{"user":"alice@acme.com","models":["fast"],"expires_in":900}'
-  # {"id":"tok_…","token":"upt_…","expires_at":"…","user":"alice@acme.com","models":["fast"]}
+    -d '{"user":"alice@acme.com","models":["gpt-5-mini"],"expires_in":900}'
+  # {"id":"tok_…","token":"upt_…","expires_at":"…","user":"alice@acme.com","models":["gpt-5-mini"]}
   ```
 
   A minted token can only narrow what its minter may do: the same tenant and application, the
@@ -223,22 +228,28 @@ A key can expire and be limited to some models. Both are optional, and can be ch
 
 ```sh
 curl -s -X POST localhost:8080/admin/applications/<app id>/keys -H "$ADMIN" \
-  -d '{"expires_in": 2592000, "allowed_models": ["smart", "openai/*"]}'   # or "expires_at": "2027-01-01T00:00:00Z"
+  -d '{"expires_in": 2592000, "allowed_models": ["gpt-5-mini", "vllm/*"]}'   # or "expires_at": "2027-01-01T00:00:00Z"
 ```
 
 An expired key gets `401 api_key_expired`, on time even though keys are cached for 30 seconds. A
-model outside the list gets `403 model_not_allowed` and is left out of `GET /v1/models`.
+model outside the list gets `403 model_not_allowed`.
 
-Call the proxy with any Open Responses or OpenAI Responses client:
+Call the proxy with any OpenAI client, with the base URL set to `http://localhost:8080/<provider>/v1`:
 
 ```sh
-curl localhost:8080/v1/responses \
+curl localhost:8080/openai/v1/responses \
   -H "Authorization: Bearer up_…" \
   -H "X-Proxy-User-Email: alice@acme.com" \
-  -d '{"model":"smart","input":"Hello!","stream":true}'
+  -d '{"model":"gpt-5-mini","input":"Hello!","stream":true}'
+
+curl localhost:8080/openai/v1/chat/completions \
+  -H "Authorization: Bearer up_…" \
+  -d '{"model":"gpt-5-mini","messages":[{"role":"user","content":"Hello!"}]}'
 ```
 
-`model` is either an alias from the config or `<provider>/<upstream model>`.
+For streamed Chat Completions the proxy asks the provider for usage
+(`stream_options.include_usage`) so it can count tokens, and leaves that last chunk out unless the
+client asked for it too. Nothing else in a request or reply is changed.
 
 Ask who used what:
 
@@ -254,39 +265,6 @@ curl -s "localhost:8080/admin/usage?group_by=tenant,application,email&granularit
 | `tenant_id`, `application_id`, `email`, `model`, `provider`, `cache_status` | Filters. |
 
 Each row also carries `cost_usd` when the model had a price at the time of the request.
-
-## Retries, fallbacks and several keys
-
-A provider can have several `deployments`: API keys (for example different OpenAI projects) or
-servers (for example vLLM replicas). New requests are spread by `weight`. A model can list
-`fallbacks`, other aliases or `<provider>/<model>`, tried in order. See `config.example.yaml`.
-
-Each request tries the picked deployment, then the provider's other healthy deployments, then each
-fallback, up to `routing.max_attempts` calls:
-
-| Upstream answer | What happens |
-|---|---|
-| 429 | The deployment rests for `Retry-After` (or `routing.cooldown`), and the next one is tried at once. |
-| 5xx, connection error, header timeout | Backoff with jitter, then the next deployment (or the same one if it is the only one). Five in a row open the deployment's circuit breaker for `open_for`; then one request probes it. |
-| 401, 403 | The deployment's key is logged as bad and kept out for `open_for`; the next one is tried. |
-| 400, 404, anything after streaming started | Returned to the client, never retried. |
-
-Retries only happen before the first byte reaches the client, so a stream is never replayed. A
-request with `previous_response_id` or encrypted reasoning stays on its provider, because that
-state lives with the upstream account. Fallbacks a credential may not use are skipped. The usage
-log records the provider, upstream model and `deployment` that served each request and how many
-`attempts` it took, and the cost uses the price of what served it. Health is per proxy process.
-Metrics: `ultimate_proxy_upstream_attempts_total`, `ultimate_proxy_fallbacks_total` and
-`ultimate_proxy_breaker_open`.
-
-**Stickiness.** Prompt caches are per deployment: per vLLM or llama.cpp replica, per OpenAI project.
-So when a provider has several deployments, each conversation keeps going to the one that served its
-last turn, for the provider's `cache_ttl` (default `insights.cache_ttl`, 5 minutes; longer suits
-vLLM). A conversation is, first match wins within an application and model: the
-`X-Proxy-Session-Id` header, `prompt_cache_key`, or the instructions and input up to the first user
-message. A request with `previous_response_id` goes to the deployment that produced that response.
-If the sticky deployment is resting or its breaker is open, the conversation moves once and sticks
-to the new one. `sticky: false` on a provider turns it off. The session map is per process for now.
 
 ## Rate limits
 
@@ -355,7 +333,7 @@ curl -s "localhost:8080/admin/prices?current=true" -H "$ADMIN"   # prices in eff
 curl -s localhost:8080/admin/prices -H "$ADMIN"                  # full history
 ```
 
-`model` matches a client-facing alias, an upstream model name, or `<provider>/<upstream model>`.
+`model` matches a model name from any provider, or `<provider>/<model>` for one provider only.
 `cached_input` and `cache_write` default to `input`. Each replica reloads the table every 30 seconds.
 
 Revoke a key with `DELETE /admin/keys/<key id>`.
@@ -378,7 +356,6 @@ hashes are kept) and compares it with what the same application sent recently. E
 | `miss_new_prefix` | Nothing similar was sent recently; a normal first request. |
 | `miss_too_short` | The prompt is below the provider's minimum cacheable size. |
 | `unknown` | The request uses `previous_response_id`, so the proxy can't see the prompt. |
-| `rerouted` | The deployment that had the conversation cached was unavailable, so it moved (see below). |
 
 `/admin/usage?group_by=application,cache` shows the mix per application. Every minute, rules look at
 the last `window` of traffic per application and model and open an insight when a rate crosses its
@@ -415,7 +392,7 @@ go test -run x -bench Overhead ./internal/server      # proxy overhead vs. calli
 scripts/compliance.sh <openresponses checkout>        # official compliance suite
 ```
 
-`cmd/fake-upstream` is a deterministic fake of the OpenAI Responses API, so tests
+`cmd/fake-upstream` is a deterministic fake of the OpenAI Responses and Chat Completions APIs, so tests
 and CI need no provider credentials.
 
 ## License

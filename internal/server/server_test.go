@@ -50,22 +50,8 @@ func newHarnessWith(t testing.TB, extra string) *harness {
 	cfg, err := config.Parse([]byte(`
 admin_token: admin
 providers:
-  - {name: openai, type: openai, base_url: "` + upSrv.URL + `/v1", api_key: fake-key}
-  - {name: badkey, type: openai, base_url: "` + upSrv.URL + `/v1", api_key: wrong}
-  - name: pool
-    type: openai
-    base_url: "` + upSrv.URL + `/v1"
-    deployments: [{name: revoked, api_key: wrong}, {name: good, api_key: fake-key}]
-  - name: duo
-    type: openai
-    base_url: "` + upSrv.URL + `/v1"
-    api_key: fake-key
-    deployments: [{name: d1}, {name: d2}]
-  - {name: local, type: chat_completions, base_url: "` + upSrv.URL + `/v1", api_key: fake-key}
-models:
-  - {name: gpt, provider: openai, upstream_model: gpt-fake}
-  - {name: llama, provider: local, upstream_model: llama-fake}
-  - {name: resilient, provider: openai, upstream_model: gpt-fake, fallbacks: [llama]}
+  - {name: openai, base_url: "` + upSrv.URL + `/v1", api_key: fake-key}
+  - {name: badkey, base_url: "` + upSrv.URL + `/v1", api_key: wrong}
 insights:
   min_cacheable_tokens: 10
   min_requests: 5
@@ -100,7 +86,12 @@ insights:
 
 func (h *harness) post(key, body string, headers ...string) *http.Response {
 	h.t.Helper()
-	req, _ := http.NewRequest(http.MethodPost, h.proxy.URL+"/v1/responses", strings.NewReader(body))
+	return h.postTo("/openai/v1/responses", key, body, headers...)
+}
+
+func (h *harness) postTo(path, key, body string, headers ...string) *http.Response {
+	h.t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, h.proxy.URL+path, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 	for i := 0; i+1 < len(headers); i += 2 {
@@ -294,19 +285,21 @@ func TestPassthroughCapturesCachedTokens(t *testing.T) {
 func TestErrors(t *testing.T) {
 	h := newHarness(t)
 	cases := []struct {
-		name, key, body string
-		status          int
-		code            string
+		name, path, key, body string
+		status                int
+		code                  string
 	}{
-		{"bad key", "up_nope", `{"model":"gpt","input":"hi"}`, 401, "invalid_api_key"},
-		{"unknown model", trustedKey, `{"model":"nope","input":"hi"}`, 400, "model_not_found"},
-		{"upstream 404", trustedKey, `{"model":"openai/missing-model","input":"hi"}`, 400, "model_not_found"},
-		{"upstream auth", trustedKey, `{"model":"badkey/gpt-fake","input":"hi"}`, 502, "upstream_auth_failed"},
-		{"bad json", trustedKey, `{`, 400, "invalid_json"},
+		{"bad key", "/openai/v1/responses", "up_nope", `{"model":"gpt","input":"hi"}`, 401, "invalid_api_key"},
+		{"upstream 404", "/openai/v1/responses", trustedKey, `{"model":"missing-model","input":"hi"}`, 400, "model_not_found"},
+		{"upstream auth", "/badkey/v1/responses", trustedKey, `{"model":"gpt-fake","input":"hi"}`, 502, "upstream_auth_failed"},
+		{"bad json", "/openai/v1/responses", trustedKey, `{`, 400, "invalid_json"},
+		{"unknown provider", "/nope/v1/responses", trustedKey, `{"model":"gpt","input":"hi"}`, 404, "not_found"},
+		{"old path", "/v1/responses", trustedKey, `{"model":"gpt","input":"hi"}`, 404, "not_found"},
+		{"unknown endpoint", "/openai/v1/embeddings", trustedKey, `{"model":"gpt","input":"hi"}`, 404, "not_found"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			resp := h.post(c.key, c.body)
+			resp := h.postTo(c.path, c.key, c.body)
 			body := decode(t, resp)
 			if resp.StatusCode != c.status {
 				t.Fatalf("status %d, want %d: %v", resp.StatusCode, c.status, body)
@@ -358,5 +351,29 @@ func TestAdminKeysAndUsage(t *testing.T) {
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 401 {
 		t.Fatalf("admin API open without token: %d", resp.StatusCode)
+	}
+}
+
+func TestModelsPassThrough(t *testing.T) {
+	h := newHarness(t)
+	get := func(path, key string) *http.Response {
+		req, _ := http.NewRequest(http.MethodGet, h.proxy.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	resp := get("/openai/v1/models", trustedKey)
+	body := decode(t, resp)
+	if resp.StatusCode != 200 || body["data"].([]any)[0].(map[string]any)["id"] != "gpt-fake" {
+		t.Fatalf("models: %d %v", resp.StatusCode, body)
+	}
+	if resp := get("/openai/v1/models", "up_nope"); resp.StatusCode != 401 {
+		t.Errorf("models without a valid key: %d", resp.StatusCode)
+	}
+	if resp := get("/badkey/v1/models", trustedKey); resp.StatusCode != 401 {
+		t.Errorf("the provider's own error passes through: %d", resp.StatusCode)
 	}
 }

@@ -1,5 +1,10 @@
 # Ultimate Proxy: Design
 
+> **Scope change (2026-10):** the proxy is now a pass-through for OpenAI-compatible APIs at
+> `/<provider>/v1/...` plus control and accounting. Translation between APIs, model aliases,
+> retries, fallbacks and cache-affinity routing described below were built and then removed.
+> The README describes what exists.
+
 Status: phases 1 (core proxy) and 2 (cache insights, cost accounting) built; later phases proposed. Spec target: Open Responses 2026-04-24.
 
 Scope note (2026-09-29): upstreams are limited to providers that speak Open Responses (OpenAI and

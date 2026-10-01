@@ -36,7 +36,7 @@ func NewOpenAI(name, baseURL, apiKey string, headers map[string]string, client *
 func (p *OpenAI) Name() string { return p.name }
 
 func (p *OpenAI) Create(ctx context.Context, call *Call, sink openresponses.Sink) (*Result, error) {
-	body := call.Env.UpstreamBody(call.UpstreamModel)
+	body := call.Env.UpstreamBody(call.Model)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return nil, openresponses.ServerError("proxy_error", err.Error())
@@ -166,4 +166,24 @@ func openAIErrorMessage(r io.Reader) string {
 		return e.Error.Message
 	}
 	return strings.TrimSpace(string(b))
+}
+
+// Get forwards a GET, such as /models, and returns the upstream's reply for
+// the caller to relay. The caller closes its body.
+func (p *OpenAI) Get(ctx context.Context, path string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+path, nil)
+	if err != nil {
+		return nil, openresponses.ServerError("proxy_error", err.Error())
+	}
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	for k, v := range p.headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, networkError(p.name, err)
+	}
+	return resp, nil
 }

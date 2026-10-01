@@ -35,7 +35,7 @@ func TestKeyPolicy(t *testing.T) {
 	if s := status("gpt"); s != 200 {
 		t.Errorf("allowed model: %d", s)
 	}
-	if s := status("openai/gpt-fake"); s != http.StatusForbidden {
+	if s := status("gpt-fake"); s != http.StatusForbidden {
 		t.Errorf("other model: %d, want 403", s)
 	}
 
@@ -43,7 +43,7 @@ func TestKeyPolicy(t *testing.T) {
 	if r := h.admin(http.MethodPatch, "/admin/keys/"+id, `{"allowed_models":null}`); r.StatusCode != 200 {
 		t.Fatalf("patch: %d", r.StatusCode)
 	}
-	if s := status("openai/gpt-fake"); s != 200 {
+	if s := status("gpt-fake"); s != 200 {
 		t.Errorf("after lifting the allowlist: %d", s)
 	}
 

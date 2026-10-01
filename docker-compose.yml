@@ -1,11 +1,11 @@
 # The whole stack: docker compose up -d --build
 #
 #   dashboard      http://localhost:3000   (sign in with SSO or PROXY_ADMIN_TOKEN)
-#   proxy          http://localhost:8080   (Open Responses API and /admin)
+#   proxy          http://localhost:8080   (/<provider>/v1/... and /admin)
 #   postgres       internal only; tenants, keys, prices (pgdata volume)
 #   clickhouse     internal only; the request log (chdata volume)
 #   valkey         internal only; rate limit counters shared by proxy replicas
-#   fake-upstream  internal only, two replicas; the free "fake-gpt" and "fake-chat" models
+#   fake-upstream  internal only; a free fake OpenAI API, the "fake" provider
 #
 # Settings come from .env (copy .env.example). Without one, the defaults
 # below are used, which are fine on your own machine but not on a server.
@@ -51,11 +51,6 @@ services:
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/fake-upstream", "-listen", ":9090", "-api-key", "fake-key"]
 
-  fake-upstream-2:
-    build: .
-    restart: unless-stopped
-    entrypoint: ["/usr/local/bin/fake-upstream", "-listen", ":9090", "-api-key", "fake-key"]
-
   proxy:
     build: .
     restart: unless-stopped
@@ -89,7 +84,6 @@ services:
       clickhouse: {condition: service_healthy}
       valkey: {condition: service_healthy}
       fake-upstream: {condition: service_started}
-      fake-upstream-2: {condition: service_started}
 
   dashboard:
     build: ./web
