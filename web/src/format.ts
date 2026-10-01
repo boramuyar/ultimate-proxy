@@ -57,11 +57,6 @@ export const CACHE_STATUS: Record<string, { label: string; tone: "good" | "bad" 
   },
   miss_new_prefix: { label: "New prompt", tone: "neutral", help: "Nothing similar was sent recently. Normal for first requests." },
   miss_too_short: { label: "Too short", tone: "neutral", help: "Below the provider's minimum cacheable size." },
-  rerouted: {
-    label: "Rerouted",
-    tone: "neutral",
-    help: "The deployment that had this conversation cached was unavailable, so it moved to another one.",
-  },
   unknown: { label: "Unknown", tone: "neutral", help: "Uses previous_response_id, so the prompt isn't visible." },
   "": { label: "Not classified", tone: "neutral", help: "Failed requests, or requests from before cache tracking." },
 };

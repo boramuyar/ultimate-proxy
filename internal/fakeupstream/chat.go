@@ -76,14 +76,9 @@ func chatText(raw json.RawMessage) (string, error) {
 	return b.String(), nil
 }
 
-// chat serves Chat Completions. It only streams, since the proxy always
-// asks for a stream.
+// chat serves Chat Completions, streamed or not.
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
-	if s.failing(w) {
-		return
-	}
-	if r.Header.Get("Authorization") != "Bearer "+s.APIKey {
-		chatError(w, http.StatusUnauthorized, "Incorrect API key provided.")
+	if !s.authorized(w, r) {
 		return
 	}
 	var raw json.RawMessage
@@ -95,10 +90,6 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	var req chatRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		chatError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if !req.Stream {
-		chatError(w, http.StatusBadRequest, "the fake only streams")
 		return
 	}
 	if strings.HasPrefix(req.Model, "missing") {
@@ -133,6 +124,37 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			chatError(w, http.StatusBadRequest, fmt.Sprintf("messages[%d].role %q is invalid", i, m.Role))
 			return
 		}
+	}
+
+	usage := func(output string) map[string]any {
+		input, out := estimateTokens(string(raw)), estimateTokens(output)
+		return map[string]any{
+			"prompt_tokens": input, "completion_tokens": out, "total_tokens": input + out,
+			"prompt_tokens_details": map[string]any{"cached_tokens": s.cached(system, estimateTokens(system))},
+		}
+	}
+	if !req.Stream {
+		msg := map[string]any{"role": "assistant", "content": nil}
+		finish := "stop"
+		if len(req.Tools) > 0 && !answeredTool && string(req.ToolChoice) != `"none"` {
+			tool := req.Tools[0].Function
+			args, _ := json.Marshal(exampleArgs(tool.Parameters))
+			msg["tool_calls"] = []any{map[string]any{"id": "call_fake", "type": "function", "function": map[string]any{"name": tool.Name, "arguments": string(args)}}}
+			finish = "tool_calls"
+		} else {
+			msg["content"] = replyText(lastText, answeredTool)
+			if strings.Contains(lastText, TriggerMaxTokens) {
+				finish = "length"
+			}
+		}
+		out, _ := json.Marshal(msg)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-fake", "object": "chat.completion", "model": req.Model,
+			"choices": []any{map[string]any{"index": 0, "message": msg, "finish_reason": finish}},
+			"usage":   usage(string(out)),
+		})
+		return
 	}
 
 	sw := &dataWriter{w: w, f: w.(http.Flusher)}
@@ -176,14 +198,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	chunk(map[string]any{}, finish)
 	if req.StreamOptions != nil && req.StreamOptions.IncludeUsage {
-		input := estimateTokens(string(raw))
-		out := estimateTokens(output)
 		_ = sw.Data(map[string]any{
 			"id": "chatcmpl-fake", "object": "chat.completion.chunk", "model": req.Model, "choices": []any{},
-			"usage": map[string]any{
-				"prompt_tokens": input, "completion_tokens": out, "total_tokens": input + out,
-				"prompt_tokens_details": map[string]any{"cached_tokens": s.cached(system, estimateTokens(system))},
-			},
+			"usage": usage(output),
 		})
 	}
 	_ = sw.Done()

@@ -27,32 +27,18 @@ admin:
     allowed_groups: ["${OIDC_ALLOWED_GROUPS}"]
     groups_claim: "${OIDC_GROUPS_CLAIM}"
 
+# Each provider is reached at /<name>/v1/..., for example
+# http://localhost:8080/fake/v1/responses. Requests pass through unchanged.
 providers:
-  # Free: a deterministic fake of the Responses API, running next to the proxy.
-  # Two replicas, so the demo shows conversations sticking to one and
-  # moving when it fails.
-  - name: fake-openai
-    type: openai
-    api_key: fake-key
-    deployments:
-      - {name: replica-1, base_url: http://fake-upstream:9090/v1}
-      - {name: replica-2, base_url: http://fake-upstream-2:9090/v1}
-  # The same fake, spoken to through Chat Completions, as for vLLM or Ollama.
-  - name: fake-local
-    type: chat_completions
+  # Free: a deterministic fake of the OpenAI API, running next to the proxy.
+  # Any model name works, such as gpt-fake.
+  - name: fake
     base_url: http://fake-upstream:9090/v1
     api_key: fake-key
   # Real provider. Calls to it fail until OPENAI_API_KEY is set in .env.
   - name: openai
-    type: openai
     base_url: https://api.openai.com/v1
     api_key: "${OPENAI_API_KEY}"
-
-models:
-  - {name: fake-gpt, provider: fake-openai, upstream_model: gpt-fake, fallbacks: [fake-chat]}
-  - {name: fake-chat, provider: fake-local, upstream_model: llama-fake}
-  - {name: smart, provider: openai, upstream_model: gpt-5}
-  - {name: fast, provider: openai, upstream_model: gpt-5-mini}
 
 bootstrap:
   - tenant: demo

@@ -32,7 +32,7 @@ sudo tail -20 /var/log/ultimate-proxy-setup.log   # shows the URL, admin token a
 Credentials live in `/opt/ultimate-proxy/.env`. To use real models, add `OPENAI_API_KEY` there and rerun `sudo bash /opt/ultimate-proxy/deploy/oracle/setup.sh`. Rerunning also
 pulls the latest `main`.
 
-Models: `fake-gpt` (free, fake answers), and `smart` and `fast` (OpenAI).
+Providers: `fake` (free, fake answers, any model name) at `/fake/v1/...`, and `openai` at `/openai/v1/...`.
 
 The proxy is served over plain HTTP on port 8080. Put it behind HTTPS before sending real keys or
 prompts over the internet.

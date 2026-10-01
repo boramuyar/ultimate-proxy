@@ -170,3 +170,21 @@ func canon(t *testing.T, m map[string]json.RawMessage) map[string]string {
 	}
 	return out
 }
+
+func TestChatUpstreamBody(t *testing.T) {
+	for in, want := range map[string]string{
+		`{"model":"m","messages":[]}`:                                    `{"model":"m","messages":[]}`,
+		`{"model":"m","stream":true}`:                                    `{"stream_options":{"include_usage":true},"model":"m","stream":true}`,
+		`{"stream":true,"stream_options":null}`:                          `{"stream":true,"stream_options":{"include_usage":true}}`,
+		`{"stream":true,"stream_options":{"include_usage":true}}`:        `{"stream":true,"stream_options":{"include_usage":true}}`,
+		`{"stream":true,"stream_options":{"include_obfuscation":false}}`: `{"stream":true,"stream_options":{"include_obfuscation":false,"include_usage":true}}`,
+	} {
+		e, err := ParseEnvelope([]byte(in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(e.ChatUpstreamBody()); got != want {
+			t.Errorf("%s:\n got %s\nwant %s", in, got, want)
+		}
+	}
+}

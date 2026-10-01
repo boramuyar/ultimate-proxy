@@ -28,3 +28,19 @@ func TestAuthValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderValidation(t *testing.T) {
+	for yaml, wantErr := range map[string]string{
+		"providers: [{name: openai, base_url: https://api.openai.com/v1}]":                  "",
+		"providers: [{name: my-vllm.2, base_url: http://vllm:8000/v1}]":                     "",
+		"providers: [{name: admin, base_url: https://x/v1}]":                                "not one of",
+		"providers: [{name: Open/AI, base_url: https://x/v1}]":                              "lowercase",
+		"providers: [{name: openai}]":                                                       "base_url",
+		"providers: [{name: a, base_url: https://x/v1}, {name: a, base_url: https://y/v1}]": "duplicate",
+	} {
+		_, err := Parse([]byte(yaml))
+		if (wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), wantErr)) {
+			t.Errorf("%s: got %v, want %q", yaml, err, wantErr)
+		}
+	}
+}

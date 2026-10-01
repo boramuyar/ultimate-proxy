@@ -17,7 +17,6 @@ const (
 	CacheToolsChanged     = "miss_tools_changed"
 	CacheHistoryRewritten = "miss_history_rewritten" // earlier turns of the conversation changed
 	CacheUnknown          = "unknown"                // previous_response_id: the prefix isn't visible
-	CacheRerouted         = "rerouted"               // the conversation moved to another deployment, whose cache is cold
 )
 
 // UnstablePrefix reports whether a status means the application itself keeps

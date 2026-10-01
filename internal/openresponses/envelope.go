@@ -22,6 +22,8 @@ type Envelope struct {
 	PreviousResponseID *string
 	SafetyIdentifier   *string
 	Metadata           map[string]string
+	// IncludeUsage is Chat Completions' stream_options.include_usage.
+	IncludeUsage bool
 
 	// Raw JSON values sliced from the body; nil when absent or null.
 	Instructions []byte
@@ -33,6 +35,8 @@ type Envelope struct {
 	objStart int  // offset just after the opening brace
 	model    span // where the model value sits in body
 	stream   span
+	// streamOptions is where a Chat Completions stream_options object sits.
+	streamOptions span
 }
 
 type span struct{ start, end int }
@@ -133,6 +137,15 @@ func (e *Envelope) set(key string, raw []byte, sp span) *APIError {
 		e.SafetyIdentifier, err = optString(raw)
 	case "metadata":
 		err = json.Unmarshal(raw, &e.Metadata)
+	case "stream_options":
+		e.streamOptions = sp
+		if !isNull {
+			var o struct {
+				IncludeUsage bool `json:"include_usage"`
+			}
+			err = json.Unmarshal(raw, &o)
+			e.IncludeUsage = o.IncludeUsage
+		}
 	case "instructions":
 		if !isNull {
 			e.Instructions = raw
@@ -223,12 +236,28 @@ func (e *Envelope) UpstreamBody(model string) []byte {
 	return append(out, e.body[i:]...)
 }
 
-// Request decodes the whole body, for adapters that translate the request
-// rather than pass it through.
-func (e *Envelope) Request() (*Request, *APIError) {
-	var r Request
-	if err := json.Unmarshal(e.body, &r); err != nil {
-		return nil, InvalidRequest("invalid_type", err.Error(), "")
+// ChatUpstreamBody returns a Chat Completions body that asks a stream for its
+// usage (stream_options.include_usage), which the proxy needs for accounting.
+// The body is unchanged when it already asks, or does not stream.
+func (e *Envelope) ChatUpstreamBody() []byte {
+	if !e.Stream || e.IncludeUsage {
+		return e.body
 	}
-	return &r, nil
+	if !e.streamOptions.ok() {
+		out := make([]byte, 0, len(e.body)+40)
+		out = append(out, e.body[:e.objStart]...)
+		out = append(out, `"stream_options":{"include_usage":true},`...)
+		return append(out, e.body[e.objStart:]...)
+	}
+	var opts map[string]json.RawMessage
+	_ = json.Unmarshal(e.body[e.streamOptions.start:e.streamOptions.end], &opts)
+	if opts == nil {
+		opts = map[string]json.RawMessage{}
+	}
+	opts["include_usage"] = json.RawMessage("true")
+	v, _ := json.Marshal(opts)
+	out := make([]byte, 0, len(e.body)+len(v))
+	out = append(out, e.body[:e.streamOptions.start]...)
+	out = append(out, v...)
+	return append(out, e.body[e.streamOptions.end:]...)
 }

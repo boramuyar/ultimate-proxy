@@ -87,8 +87,10 @@ jobs:
         run: |
           curl -sf localhost:3000/ | grep -q '<div id="root">'
           curl -sf localhost:3000/admin/usage?group_by=application -H "Authorization: Bearer dev-admin-token" | grep -q support-bot
-          curl -sf localhost:8080/v1/responses -H "Authorization: Bearer up_demo_key" \
-            -d '{"model":"fake-gpt","input":"hi"}' | grep -q '"status":"completed"'
+          curl -sf localhost:8080/fake/v1/responses -H "Authorization: Bearer up_demo_key" \
+            -d '{"model":"gpt-fake","input":"hi"}' | grep -q '"status":"completed"'
+          curl -sf localhost:8080/fake/v1/chat/completions -H "Authorization: Bearer up_demo_key" \
+            -d '{"model":"gpt-fake","messages":[{"role":"user","content":"hi"}]}' | grep -q '"finish_reason":"stop"'
       - name: Logs
         if: failure()
         run: docker compose logs

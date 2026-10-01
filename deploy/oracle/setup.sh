@@ -69,7 +69,7 @@ Demo key:    $DEMO_APP_KEY
 (both are stored in $ENV)
 
 Try it:
-  curl http://$IP:8080/v1/responses -H "Authorization: Bearer $DEMO_APP_KEY" \\
-    -H "X-Proxy-User-Email: you@example.com" -d '{"model":"fake-gpt","input":"hi"}'
+  curl http://$IP:8080/fake/v1/responses -H "Authorization: Bearer $DEMO_APP_KEY" \\
+    -H "X-Proxy-User-Email: you@example.com" -d '{"model":"gpt-fake","input":"hi"}'
   curl "http://$IP:8080/admin/usage?group_by=email" -H "Authorization: Bearer $PROXY_ADMIN_TOKEN"
 DONE

@@ -49,53 +49,23 @@ admin:
 #       tenant: acme              # or claims.tenant
 #       claims: {app: azp, user: email, groups: groups, models: llm_models}
 #       group_models:
-#         ml-team: [smart, openai/*]
-#   # Web pages allowed to call /v1 from a browser, e.g. with tokens from
+#         ml-team: [gpt-5, vllm/*]
+#   # Web pages allowed to call the API from a browser, e.g. with tokens from
 #   # POST /v1/tokens. Empty allows none.
 #   cors_origins: [https://app.example.com]
 
+# Upstreams. Each one is reached at /<name>/v1/..., for example
+# /openai/v1/responses or /openai/v1/chat/completions, and requests pass
+# through unchanged. Any server that speaks the OpenAI API works: OpenAI,
+# vLLM, Ollama, llama.cpp, Groq, Together, OpenRouter...
 providers:
-  # Any upstream that speaks Open Responses (OpenAI's Responses API or a
-  # compatible server). Requests and events are relayed as-is.
   - name: openai
-    type: openai
     base_url: https://api.openai.com/v1
     api_key: "${OPENAI_API_KEY}"
-  # Any OpenAI-compatible server that only has Chat Completions (vLLM, Ollama,
-  # llama.cpp, LiteLLM, Groq, Together, OpenRouter...). Clients still use
-  # /v1/responses; the proxy translates requests and streams.
-  # - name: local
-  #   type: chat_completions
+  # - name: vllm
   #   base_url: http://vllm:8000/v1
   #   api_key: "${VLLM_API_KEY}"
-  #   # Several keys or replicas behind one provider. Each deployment inherits
-  #   # base_url, api_key and headers unless it sets its own.
-  #   deployments:
-  #     - {name: gpu-1, base_url: http://vllm-1:8000/v1, weight: 2}
-  #     - {name: gpu-2, base_url: http://vllm-2:8000/v1}
-  #   # Conversations stick to the replica that has their prefix cached, for
-  #   # this long (default insights.cache_ttl). sticky: false turns it off.
-  #   cache_ttl: 30m
-
-# Client-facing model names. Clients can also send "<provider>/<model>",
-# for example "openai/gpt-5".
-models:
-  - name: smart
-    provider: openai
-    upstream_model: gpt-5
-  - name: fast
-    provider: openai
-    upstream_model: gpt-5-mini
-    # Tried in order when every deployment of this model fails.
-    # fallbacks: [smart, local/qwen3-32b]
-
-# Retries and fallbacks happen only before anything reached the client.
-# These are the defaults.
-# routing:
-#   max_attempts: 3                    # upstream calls per request, first included
-#   backoff: {base: 250ms, max: 2s}    # after 5xx and connection errors, with jitter
-#   cooldown: 10s                      # rest after a 429 without Retry-After
-#   breaker: {failures: 5, open_for: 30s}
+  #   headers: {X-Team: platform}   # extra headers sent upstream
 
 # Model prices live in the database, not here: add them with
 # POST /admin/prices (see the README).

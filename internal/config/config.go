@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,8 +45,6 @@ type Config struct {
 	} `yaml:"usage"`
 
 	Providers []Provider `yaml:"providers"`
-	Models    []Model    `yaml:"models"`
-	Routing   Routing    `yaml:"routing"`
 	Insights  Insights   `yaml:"insights"`
 	Bootstrap []Tenant   `yaml:"bootstrap"`
 }
@@ -179,70 +178,13 @@ type OIDC struct {
 // Enabled reports whether OIDC sign-in is configured.
 func (o *OIDC) Enabled() bool { return o.Issuer != "" }
 
+// Provider is an upstream that speaks the OpenAI API. Clients reach it at
+// /<name>/v1/..., and the proxy forwards their requests unchanged.
 type Provider struct {
-	Name string `yaml:"name"`
-	// Type is the API the upstream speaks: openai (the Responses API, passed
-	// through untouched) or chat_completions (translated, for vLLM, Ollama and
-	// other OpenAI-compatible servers).
-	Type    string            `yaml:"type"`
-	BaseURL string            `yaml:"base_url"`
-	APIKey  string            `yaml:"api_key"`
-	Headers map[string]string `yaml:"headers"`
-	// Deployments spread a provider over several keys or servers. Each one
-	// inherits base_url, api_key and headers from the provider unless it sets
-	// its own. Without any, the provider is a single deployment named after it.
-	Deployments []Deployment `yaml:"deployments"`
-	// Sticky keeps each conversation on the deployment that served its last
-	// turn while that deployment's prompt cache is likely warm. Default on;
-	// it only matters with several deployments.
-	Sticky *bool `yaml:"sticky"`
-	// CacheTTL is how long the upstream keeps a prompt prefix cached, and so
-	// how long a conversation sticks. Default insights.cache_ttl.
-	CacheTTL time.Duration `yaml:"cache_ttl"`
-}
-
-// IsSticky reports whether conversations stick to a deployment.
-func (p *Provider) IsSticky() bool { return p.Sticky == nil || *p.Sticky }
-
-type Deployment struct {
 	Name    string            `yaml:"name"`
 	BaseURL string            `yaml:"base_url"`
 	APIKey  string            `yaml:"api_key"`
 	Headers map[string]string `yaml:"headers"`
-	// Weight is this deployment's share of new traffic; default 1.
-	Weight int `yaml:"weight"`
-}
-
-// Model maps a client-facing model name to a provider and upstream model.
-// Requests may also name "<provider>/<upstream model>" directly.
-type Model struct {
-	Name          string `yaml:"name"`
-	Provider      string `yaml:"provider"`
-	UpstreamModel string `yaml:"upstream_model"`
-	// Fallbacks are tried in order when every deployment of this model
-	// fails: other aliases, or "<provider>/<upstream model>".
-	Fallbacks []string `yaml:"fallbacks"`
-}
-
-// Routing says how requests retry and move between deployments and models.
-// Retries only happen before anything was sent to the client.
-type Routing struct {
-	// MaxAttempts caps upstream calls per request, the first one included.
-	MaxAttempts int `yaml:"max_attempts"`
-	Backoff     struct {
-		Base time.Duration `yaml:"base"`
-		Max  time.Duration `yaml:"max"`
-	} `yaml:"backoff"`
-	// Cooldown is how long a deployment rests after a 429 that named no
-	// Retry-After.
-	Cooldown time.Duration `yaml:"cooldown"`
-	Breaker  struct {
-		// Failures in a row that open a deployment's breaker.
-		Failures int `yaml:"failures"`
-		// OpenFor is how long an open breaker keeps traffic away before one
-		// request probes the deployment again.
-		OpenFor time.Duration `yaml:"open_for"`
-	} `yaml:"breaker"`
 }
 
 // Tenant, Application and keys to create at startup, so a fresh deployment
@@ -288,46 +230,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Limits.ReloadInterval == 0 {
 		c.Limits.ReloadInterval = 10 * time.Second
-	}
-	r := &c.Routing
-	if r.MaxAttempts == 0 {
-		r.MaxAttempts = 3
-	}
-	if r.Backoff.Base == 0 {
-		r.Backoff.Base = 250 * time.Millisecond
-	}
-	if r.Backoff.Max == 0 {
-		r.Backoff.Max = 2 * time.Second
-	}
-	if r.Cooldown == 0 {
-		r.Cooldown = 10 * time.Second
-	}
-	if r.Breaker.Failures == 0 {
-		r.Breaker.Failures = 5
-	}
-	if r.Breaker.OpenFor == 0 {
-		r.Breaker.OpenFor = 30 * time.Second
-	}
-	for i := range c.Providers {
-		p := &c.Providers[i]
-		if len(p.Deployments) == 0 {
-			p.Deployments = []Deployment{{Name: p.Name}}
-		}
-		for j := range p.Deployments {
-			d := &p.Deployments[j]
-			if d.BaseURL == "" {
-				d.BaseURL = p.BaseURL
-			}
-			if d.APIKey == "" {
-				d.APIKey = p.APIKey
-			}
-			if d.Headers == nil {
-				d.Headers = p.Headers
-			}
-			if d.Weight == 0 {
-				d.Weight = 1
-			}
-		}
 	}
 	if c.Usage.QueueSize == 0 {
 		c.Usage.QueueSize = 100_000
@@ -376,11 +278,6 @@ func (c *Config) applyDefaults() {
 	in := &c.Insights
 	if in.CacheTTL == 0 {
 		in.CacheTTL = 5 * time.Minute
-	}
-	for i := range c.Providers {
-		if c.Providers[i].CacheTTL == 0 {
-			c.Providers[i].CacheTTL = in.CacheTTL
-		}
 	}
 	if in.MinCacheableTokens == 0 {
 		in.MinCacheableTokens = 1024
@@ -464,55 +361,32 @@ func (c *Config) validate() error {
 	}
 	names := map[string]bool{}
 	for _, p := range c.Providers {
-		if p.Name == "" || strings.Contains(p.Name, "/") {
-			return fmt.Errorf("provider name %q must be non-empty and contain no '/'", p.Name)
+		if !validProviderName(p.Name) {
+			return fmt.Errorf("provider name %q must be lowercase letters, digits, '-', '_' or '.', and not one of %s", p.Name, strings.Join(reservedPaths, ", "))
 		}
 		if names[p.Name] {
 			return fmt.Errorf("duplicate provider %q", p.Name)
 		}
 		names[p.Name] = true
-		seen := map[string]bool{}
-		for _, d := range p.Deployments {
-			if d.Name == "" || seen[d.Name] {
-				return fmt.Errorf("provider %q: deployments need unique names", p.Name)
-			}
-			seen[d.Name] = true
-			if d.Weight < 0 {
-				return fmt.Errorf("provider %q: deployment %q has a negative weight", p.Name, d.Name)
-			}
+		if u, err := url.Parse(p.BaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("provider %q: base_url must be an http(s) URL, got %q", p.Name, p.BaseURL)
 		}
-		switch p.Type {
-		case "openai", "chat_completions":
-		default:
-			return fmt.Errorf("provider %q: unknown type %q (want openai or chat_completions)", p.Name, p.Type)
-		}
-	}
-	aliases := map[string]bool{}
-	for _, m := range c.Models {
-		if m.Name == "" || m.UpstreamModel == "" {
-			return fmt.Errorf("model entries need name and upstream_model")
-		}
-		if !names[m.Provider] {
-			return fmt.Errorf("model %q: unknown provider %q", m.Name, m.Provider)
-		}
-		aliases[m.Name] = true
-	}
-	for _, m := range c.Models {
-		for _, f := range m.Fallbacks {
-			prov, upstream, direct := strings.Cut(f, "/")
-			switch {
-			case f == m.Name:
-				return fmt.Errorf("model %q: falls back to itself", m.Name)
-			case aliases[f]:
-			case direct && names[prov] && upstream != "":
-			default:
-				return fmt.Errorf("model %q: fallback %q is neither a model nor <provider>/<model>", m.Name, f)
-			}
-		}
-	}
-	r := c.Routing
-	if r.MaxAttempts < 1 || r.Breaker.Failures < 1 || r.Backoff.Base < 0 || r.Backoff.Max < r.Backoff.Base || r.Cooldown < 0 || r.Breaker.OpenFor < 0 {
-		return fmt.Errorf("routing: max_attempts and breaker.failures must be at least 1, durations positive, and backoff.max at least backoff.base")
 	}
 	return nil
+}
+
+// reservedPaths are first path segments the proxy serves itself, so no
+// provider may take them.
+var reservedPaths = []string{"admin", "v1", "healthz", "metrics"}
+
+func validProviderName(n string) bool {
+	if n == "" || slices.Contains(reservedPaths, n) {
+		return false
+	}
+	for _, c := range n {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
 }

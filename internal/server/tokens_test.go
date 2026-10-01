@@ -45,7 +45,7 @@ func TestMintedTokenFromAPIKey(t *testing.T) {
 		t.Errorf("unexpected usage event %+v", e)
 	}
 	// Other models are refused.
-	if resp := h.post(token, `{"model":"openai/gpt-fake","input":"hi"}`); resp.StatusCode != http.StatusForbidden {
+	if resp := h.post(token, `{"model":"gpt-fake","input":"hi"}`); resp.StatusCode != http.StatusForbidden {
 		t.Errorf("other model: status %d, want 403", resp.StatusCode)
 	}
 	// A token cannot mint more tokens.
@@ -117,7 +117,7 @@ func TestMintedTokenFromJWT(t *testing.T) {
 func TestCORS(t *testing.T) {
 	h := newHarnessWith(t, "auth: {cors_origins: [https://app.example.com]}\n")
 	for origin, allowed := range map[string]bool{"https://app.example.com": true, "https://evil.example.com": false} {
-		req, _ := http.NewRequest(http.MethodOptions, h.proxy.URL+"/v1/responses", nil)
+		req, _ := http.NewRequest(http.MethodOptions, h.proxy.URL+"/openai/v1/responses", nil)
 		req.Header.Set("Origin", origin)
 		req.Header.Set("Access-Control-Request-Method", "POST")
 		resp, err := http.DefaultClient.Do(req)
