@@ -3,11 +3,14 @@ package store
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -152,16 +155,21 @@ GROUP BY hour, tenant_id, app_id, user_email, model, provider, cache_status, tag
 
 // NewClickHouse connects to a URL like http://user:password@host:8123/database,
 // creates the database and tables if they are missing, and sets raw events to
-// expire after retentionDays (0 keeps them forever).
+// expire after retentionDays (0 keeps them forever). With https, the optional
+// ?sslrootcert=/path/ca.pem adds a CA to trust for this server alone.
 func NewClickHouse(ctx context.Context, rawURL string, retentionDays int) (*ClickHouse, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("clickhouse_url must look like http://user:password@host:8123/database")
 	}
+	client, err := clickhouseClient(u.Query().Get("sslrootcert"))
+	if err != nil {
+		return nil, err
+	}
 	c := &ClickHouse{
 		endpoint: u.Scheme + "://" + u.Host + "/",
 		db:       strings.Trim(u.Path, "/"),
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   client,
 	}
 	if c.db == "" {
 		c.db = "default"
@@ -170,7 +178,7 @@ func NewClickHouse(ctx context.Context, rawURL string, retentionDays int) (*Clic
 		c.user = u.User.Username()
 		c.password, _ = u.User.Password()
 	}
-	if err := c.exec(ctx, "CREATE DATABASE IF NOT EXISTS "+quoteIdent(c.db), nil, ""); err != nil {
+	if err := c.ensureDatabase(ctx); err != nil {
 		return nil, fmt.Errorf("connect to clickhouse: %w", err)
 	}
 	for _, stmt := range []string{clickhouseSchema, clickhouseAddColumns, clickhouseRollupSchema} {
@@ -188,6 +196,45 @@ func NewClickHouse(ctx context.Context, rawURL string, retentionDays int) (*Clic
 		return nil, fmt.Errorf("set clickhouse retention: %w", err)
 	}
 	return c, nil
+}
+
+// clickhouseClient returns an HTTP client that also trusts the CAs in
+// caFile, when one is given, on top of the system's.
+func clickhouseClient(caFile string) (*http.Client, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	if caFile == "" {
+		return client, nil
+	}
+	pem, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse_url sslrootcert: %w", err)
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		roots = x509.NewCertPool()
+	}
+	if !roots.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("clickhouse_url sslrootcert: no PEM certificates in %s", caFile)
+	}
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+	client.Transport = t
+	return client, nil
+}
+
+// ensureDatabase creates the database only when it is missing, so a user
+// granted rights on one database someone else made (a shared or managed
+// server) needs no CREATE DATABASE grant. ClickHouse checks that grant
+// before IF NOT EXISTS.
+func (c *ClickHouse) ensureDatabase(ctx context.Context) error {
+	n, err := c.queryString(ctx, "SELECT count() FROM system.databases WHERE name = {db:String}")
+	if err != nil {
+		return err
+	}
+	if n != "0" {
+		return nil
+	}
+	return c.exec(ctx, "CREATE DATABASE IF NOT EXISTS "+quoteIdent(c.db), nil, "")
 }
 
 // upgradeRollup adds columns to a rollup and view made before they existed.

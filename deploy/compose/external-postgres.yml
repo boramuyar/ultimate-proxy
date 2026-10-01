@@ -1,0 +1,12 @@
+# Use your own Postgres (13 or later; RDS, Aurora, Cloud SQL, ...) instead of
+# the bundled one. Set DATABASE_URL and add this file in .env:
+#
+#   DATABASE_URL=postgres://proxy:password@db.internal:5432/company?search_path=proxy&sslmode=require
+#   COMPOSE_FILE=docker-compose.yml:deploy/compose/external-postgres.yml
+services:
+  postgres:
+    # A profile nobody turns on, so the bundled Postgres never starts.
+    profiles: [bundled-postgres]
+  proxy:
+    depends_on:
+      postgres: !reset null

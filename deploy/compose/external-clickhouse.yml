@@ -1,0 +1,12 @@
+# Use your own ClickHouse (a single server, or ClickHouse Cloud) instead of the
+# bundled one. Set CLICKHOUSE_URL and add this file in .env:
+#
+#   CLICKHOUSE_URL=https://proxy:password@abc123.eu-west-1.aws.clickhouse.cloud:8443/proxy
+#   COMPOSE_FILE=docker-compose.yml:deploy/compose/external-clickhouse.yml
+services:
+  clickhouse:
+    # A profile nobody turns on, so the bundled ClickHouse never starts.
+    profiles: [bundled-clickhouse]
+  proxy:
+    depends_on:
+      clickhouse: !reset null

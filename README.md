@@ -111,6 +111,52 @@ COMPOSE_FILE=docker-compose.yml:deploy/compose/external-redis.yml
 Valkey. Every key starts with `rl/`, so a database number of its own (`/3` above) keeps them apart from
 your other data. Nothing in it needs a backup: the proxy rebuilds budgets from the usage log.
 
+### Using your own Postgres or ClickHouse
+
+If your company already runs Postgres (RDS, Aurora, Cloud SQL, your own) or ClickHouse (ClickHouse Cloud or
+your own server), the proxy can use them instead of the bundled ones, each on its own. It only needs a
+schema or database of its own and a user with rights there; it creates and upgrades its tables itself
+on start, and several replicas starting together take turns. Add to `.env` the URL of each you bring,
+and its compose file to `COMPOSE_FILE` (files joined with `:`), which stops compose from starting the
+bundled one:
+
+```sh
+DATABASE_URL=postgres://proxy:password@db.internal:5432/company?search_path=proxy&sslmode=require
+CLICKHOUSE_URL=https://proxy:password@abc123.eu-west-1.aws.clickhouse.cloud:8443/proxy
+COMPOSE_FILE=docker-compose.yml:deploy/compose/external-postgres.yml:deploy/compose/external-clickhouse.yml
+```
+
+**Postgres** 13 or later (13 and 16 are tested). To share a database with other services, give the proxy
+a schema it owns and name it in `search_path`; nothing else in the database is touched:
+
+```sql
+CREATE ROLE proxy LOGIN PASSWORD '...';
+CREATE SCHEMA proxy AUTHORIZATION proxy;
+```
+
+The URL takes every [libpq option](https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-PARAMKEYWORDS)
+the pgx driver supports. For TLS, `sslmode=require` encrypts; `sslmode=verify-full` also checks the
+server's certificate, and with RDS or Aurora needs AWS's CA bundle: put
+[`global-bundle.pem`](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem) in
+`deploy/compose/certs/` and add `&sslrootcert=/etc/ultimate-proxy/certs/global-bundle.pem`. Behind
+PgBouncer in transaction mode (or RDS Proxy), add `&default_query_exec_mode=exec`, since prepared
+statements do not survive between transactions there.
+
+**ClickHouse** 24.8 or later on a single server, or ClickHouse Cloud (24.8 and 25.8 are tested). Use `https://`
+and port 8443 for TLS; for a certificate from a private CA, put the CA in `deploy/compose/certs/` and
+add `?sslrootcert=/etc/ultimate-proxy/certs/ca.pem`. The proxy creates the database if it is missing,
+but a user who may not create databases can use one made for it, with these rights:
+
+```sql
+CREATE DATABASE proxy;
+CREATE USER proxy IDENTIFIED BY '...';
+GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP VIEW ON proxy.* TO proxy;
+```
+
+The tables are plain `MergeTree` tables made on the server the URL points at (ClickHouse Cloud turns
+them into replicated ones by itself). A self-hosted cluster of several servers is not supported: the
+proxy does not make `ON CLUSTER` or `Replicated` tables, so point it at one server.
+
 ## Dashboard
 
 The dashboard (`web/`: React, Tailwind CSS and shadcn/ui components, light theme, square edges, monospace type) is a front end for the admin API. `npx shadcn add <component>` works there to add more components.

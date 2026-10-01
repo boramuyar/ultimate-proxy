@@ -33,11 +33,32 @@ func NewPostgres(ctx context.Context, url string) (*Postgres, error) {
 		pool.Close()
 		return nil, fmt.Errorf("connect to postgres: %w", err)
 	}
-	if _, err := pool.Exec(ctx, schema); err != nil {
+	if err := applySchema(ctx, pool); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 	return &Postgres{pool: pool}, nil
+}
+
+// schemaLock is the advisory lock key held while the schema is applied.
+const schemaLock = 0x7570726f7879 // "uproxy"
+
+// applySchema runs schema.sql in one transaction under an advisory lock, so
+// replicas starting together on an empty database take turns instead of
+// failing on each other's CREATE TABLE.
+func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(schemaLock)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, schema); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (p *Postgres) Close() { p.pool.Close() }
