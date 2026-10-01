@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 // TokenPrefix starts every token the proxy mints for client-side agents.
-const TokenPrefix = "upt_"
+const TokenPrefix = "opt_"
 
 // NewToken returns a new proxy token and its hash. Only the hash is stored.
 func NewToken() (token, hash string) {

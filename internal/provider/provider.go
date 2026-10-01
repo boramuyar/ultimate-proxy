@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
 )
 
 // Call is one request routed to an upstream.

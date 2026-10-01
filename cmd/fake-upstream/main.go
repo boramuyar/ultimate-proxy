@@ -7,7 +7,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/boramuyar/ultimate-proxy/internal/fakeupstream"
+	"github.com/omni-proxy/omni-proxy/internal/fakeupstream"
 )
 
 func main() {

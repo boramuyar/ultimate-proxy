@@ -24,13 +24,13 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
-	"github.com/boramuyar/ultimate-proxy/internal/config"
-	"github.com/boramuyar/ultimate-proxy/internal/identity"
+	"github.com/omni-proxy/omni-proxy/internal/config"
+	"github.com/omni-proxy/omni-proxy/internal/identity"
 )
 
 const (
-	sessionCookie = "up_session"
-	loginCookie   = "up_login"
+	sessionCookie = "op_session"
+	loginCookie   = "op_login"
 	loginTTL      = 10 * time.Minute
 
 	// CSRFHeader must be sent with cookie-authenticated requests that change
@@ -140,9 +140,6 @@ func New(cfg config.Admin, log *slog.Logger) *Auth {
 	}
 	return a
 }
-
-// Enabled reports whether any sign-in method is configured.
-func (a *Auth) Enabled() bool { return a.cfg.Token != "" || a.cfg.OIDC.Enabled() }
 
 // Authenticate returns who made the request, or nil.
 func (a *Auth) Authenticate(r *http.Request) *Principal {

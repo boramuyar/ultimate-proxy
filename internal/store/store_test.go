@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
 )
 
 // stores returns the memory store and, when TEST_DATABASE_URL or
@@ -57,7 +57,7 @@ func TestStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			key, err := st.CreateKey(ctx, app.ID, "hash1", "up_abc")
+			key, err := st.CreateKey(ctx, app.ID, "hash1", "op_abc")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -356,7 +356,7 @@ func TestKeyPolicy(t *testing.T) {
 			ctx := context.Background()
 			ten, _ := st.EnsureTenant(ctx, "policy")
 			app, _ := st.EnsureApplication(ctx, ten.ID, "bot", true)
-			k, err := st.CreateKey(ctx, app.ID, "policy-hash", "up_pol")
+			k, err := st.CreateKey(ctx, app.ID, "policy-hash", "op_pol")
 			if err != nil || k.ExpiresAt != nil || k.AllowedModels != nil {
 				t.Fatalf("new key: %+v, %v", k, err)
 			}

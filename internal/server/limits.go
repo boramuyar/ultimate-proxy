@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/limits"
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/limits"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 // limitSubject is who a request counts against.

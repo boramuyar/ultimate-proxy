@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/fakeoidc"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/fakeoidc"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 func newJWTHarness(t *testing.T, authYAML string) (*harness, *fakeoidc.Server) {
@@ -24,7 +24,7 @@ const jwtAuth = `
 auth:
   jwt:
     - issuer: ISSUER
-      audience: ultimate-proxy
+      audience: omni-proxy
       claims: {tenant: org, models: llm_models}
 `
 
@@ -43,7 +43,7 @@ func (h *harness) events(want int) []store.UsageEvent {
 func TestJWTAttributesUsageToClaims(t *testing.T) {
 	h, idp := newJWTHarness(t, jwtAuth)
 	token := idp.AccessToken(map[string]any{
-		"sub": "u-42", "aud": "ultimate-proxy", "org": "initech", "azp": "coding-agent", "email": "Peter@Initech.com",
+		"sub": "u-42", "aud": "omni-proxy", "org": "initech", "azp": "coding-agent", "email": "Peter@Initech.com",
 	})
 	// The user named by the token wins over one the caller asserts.
 	resp := h.post(token, `{"model":"gpt","input":"hi"}`, "X-Proxy-User-Email", "someone@else.com")
@@ -80,7 +80,7 @@ func TestJWTAttributesUsageToClaims(t *testing.T) {
 
 func TestJWTRejections(t *testing.T) {
 	h, idp := newJWTHarness(t, jwtAuth)
-	good := map[string]any{"sub": "u", "aud": "ultimate-proxy", "org": "initech"}
+	good := map[string]any{"sub": "u", "aud": "omni-proxy", "org": "initech"}
 	with := func(k string, v any) map[string]any {
 		c := map[string]any{}
 		for kk, vv := range good {
@@ -101,7 +101,7 @@ func TestJWTRejections(t *testing.T) {
 		{"unknown issuer", idp.AccessToken(with("iss", "https://evil.example.com")), "invalid_token"},
 		{"wrong key", other.AccessToken(good), "invalid_token"},
 		{"tampered", valid[:len(valid)-4] + "AAAA", "invalid_token"},
-		{"no tenant", idp.AccessToken(map[string]any{"sub": "u", "aud": "ultimate-proxy"}), "invalid_token"},
+		{"no tenant", idp.AccessToken(map[string]any{"sub": "u", "aud": "omni-proxy"}), "invalid_token"},
 	}
 	for _, c := range cases {
 		resp := h.post(c.token, `{"model":"gpt","input":"hi"}`)
@@ -133,7 +133,7 @@ func TestJWTModelAllowlist(t *testing.T) {
 		{"no group", map[string]any{"groups": []any{"sales"}}, "gpt", 403},
 	}
 	for _, c := range cases {
-		claims := map[string]any{"sub": "u", "aud": "ultimate-proxy", "org": "initech"}
+		claims := map[string]any{"sub": "u", "aud": "omni-proxy", "org": "initech"}
 		for k, v := range c.claims {
 			claims[k] = v
 		}
@@ -151,7 +151,7 @@ func TestAPIKeysCanBeTurnedOff(t *testing.T) {
 	if resp := h.post(trustedKey, `{"model":"gpt","input":"hi"}`); resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("api key with api_keys off: status %d, want 401", resp.StatusCode)
 	}
-	token := idp.AccessToken(map[string]any{"sub": "u", "aud": "ultimate-proxy", "org": "initech"})
+	token := idp.AccessToken(map[string]any{"sub": "u", "aud": "omni-proxy", "org": "initech"})
 	if resp := h.post(token, `{"model":"gpt","input":"hi"}`); resp.StatusCode != 200 {
 		t.Errorf("jwt: status %d", resp.StatusCode)
 	}

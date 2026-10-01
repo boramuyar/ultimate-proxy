@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/identity"
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/identity"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 const (

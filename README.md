@@ -1,10 +1,13 @@
-# Ultimate Proxy
+# Omni Proxy
+
+[![CI](https://github.com/omni-proxy/omni-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/omni-proxy/omni-proxy/actions/workflows/ci.yml)
 
 A fast, self-hosted LLM gateway: a pass-through proxy for OpenAI-compatible APIs
 ([Responses](https://www.openresponses.org/) and Chat Completions) that controls and meters every
 request by **tenant**, **application** and **end-user email**.
 
-See [docs/DESIGN.md](docs/DESIGN.md) for the full design and roadmap.
+Omni Proxy is open source under the MIT license. It is before 1.0, so a minor version may change the
+config or the admin API; [CHANGELOG.md](CHANGELOG.md) says what changed and how to upgrade.
 
 ## What it does
 
@@ -58,14 +61,20 @@ scripts/demo-traffic.sh     # optional: sample tenants, traffic and cache proble
 | What | Where |
 | --- | --- |
 | Dashboard | http://localhost:3000, sign in with your identity provider (see [Signing in](#signing-in)) or `PROXY_ADMIN_TOKEN` (default `dev-admin-token`) |
-| Proxy API | http://localhost:8080, demo key `up_demo_key` for the `demo/playground` application |
+| Proxy API | http://localhost:8080, demo key `op_demo_key` for the `demo/playground` application |
+
+That builds the images from your checkout. To run a published release instead, set
+`OMNI_PROXY_VERSION` in `.env` to a version from the [releases](https://github.com/omni-proxy/omni-proxy/releases)
+(such as `0.1.0`), then `docker compose pull && docker compose up -d`. The images are
+`ghcr.io/omni-proxy/omni-proxy` (the proxy, and the fake provider) and `ghcr.io/omni-proxy/dashboard`,
+for linux/amd64 and linux/arm64; `omni-proxy -version` prints the version.
 
 The proxy config for the stack is `deploy/compose/config.yaml`: providers `fake` (free, at
 `/fake/v1/...`) and `openai` (at `/openai/v1/...`, once `OPENAI_API_KEY` is set). Tenants, keys and prices live in the `pgdata` volume and the
 request log in the `chdata` volume; `docker compose down -v` wipes both. `POSTGRES_PASSWORD` and
 `CLICKHOUSE_PASSWORD` only apply when their volume is first created.
 
-Without Docker: `go run ./cmd/ultimate-proxy -config config.yaml` (see `config.example.yaml`; without
+Without Docker: `go run ./cmd/omni-proxy -config config.yaml` (see `config.example.yaml`; without
 `database_url` everything is kept in memory, and without `clickhouse_url` usage stays in Postgres), and `cd web && npm install && npm run dev` for the
 dashboard on http://localhost:5173, which forwards `/admin` to `localhost:8080`.
 
@@ -138,13 +147,13 @@ The URL takes every [libpq option](https://www.postgresql.org/docs/current/libpq
 the pgx driver supports. For TLS, `sslmode=require` encrypts; `sslmode=verify-full` also checks the
 server's certificate, and with RDS or Aurora needs AWS's CA bundle: put
 [`global-bundle.pem`](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem) in
-`deploy/compose/certs/` and add `&sslrootcert=/etc/ultimate-proxy/certs/global-bundle.pem`. Behind
+`deploy/compose/certs/` and add `&sslrootcert=/etc/omni-proxy/certs/global-bundle.pem`. Behind
 PgBouncer in transaction mode (or RDS Proxy), add `&default_query_exec_mode=exec`, since prepared
 statements do not survive between transactions there.
 
 **ClickHouse** 24.8 or later on a single server, or ClickHouse Cloud (24.8 and 25.8 are tested). Use `https://`
 and port 8443 for TLS; for a certificate from a private CA, put the CA in `deploy/compose/certs/` and
-add `?sslrootcert=/etc/ultimate-proxy/certs/ca.pem`. The proxy creates the database if it is missing,
+add `?sslrootcert=/etc/omni-proxy/certs/ca.pem`. The proxy creates the database if it is missing,
 but a user who may not create databases can use one made for it, with these rights:
 
 ```sql
@@ -257,10 +266,10 @@ first time a token names them. Nothing has to be created in the proxy first.
 
 ```yaml
 auth:
-  api_keys: true          # keep accepting up_ keys too (the default)
+  api_keys: true          # keep accepting op_ keys too (the default)
   jwt:
     - issuer: https://keycloak.example.com/realms/acme   # must equal the tokens' iss exactly
-      audience: ultimate-proxy   # required: tokens issued for other services are refused
+      audience: omni-proxy   # required: tokens issued for other services are refused
       tenant: acme               # a fixed tenant for this issuer, or:
       claims:
         tenant: org_id           # the claim naming the tenant (wins over the fixed one)
@@ -283,7 +292,7 @@ request for any other model gets `403 model_not_allowed`. When neither `claims.m
 `group_models` is set, every model is allowed.
 
 With Keycloak, add an *Audience* mapper to the client so its access tokens carry
-`aud: ultimate-proxy`, and a *Group Membership* mapper (with "Full group path" off) for `groups`.
+`aud: omni-proxy`, and a *Group Membership* mapper (with "Full group path" off) for `groups`.
 
 Usage events record how each request authenticated (`auth_method`: `api_key`, `jwt` or
 `proxy_token`) and the key ID, the token's `sub`, or the minted token's ID as `subject`.
@@ -300,9 +309,9 @@ ways to give it a credential that expires in minutes:
   access token, asks for a short-lived token and hands it to the client:
 
   ```sh
-  curl -s localhost:8080/v1/tokens -H "Authorization: Bearer up_…" \
+  curl -s localhost:8080/v1/tokens -H "Authorization: Bearer op_…" \
     -d '{"user":"alice@acme.com","models":["gpt-5-mini"],"expires_in":900}'
-  # {"id":"tok_…","token":"upt_…","expires_at":"…","user":"alice@acme.com","models":["gpt-5-mini"]}
+  # {"id":"tok_…","token":"opt_…","expires_at":"…","user":"alice@acme.com","models":["gpt-5-mini"]}
   ```
 
   A minted token can only narrow what its minter may do: the same tenant and application, the
@@ -345,12 +354,12 @@ Call the proxy with any OpenAI client, with the base URL set to `http://localhos
 
 ```sh
 curl localhost:8080/openai/v1/responses \
-  -H "Authorization: Bearer up_…" \
+  -H "Authorization: Bearer op_…" \
   -H "X-Proxy-User-Email: alice@acme.com" \
   -d '{"model":"gpt-5-mini","input":"Hello!","stream":true}'
 
 curl localhost:8080/openai/v1/chat/completions \
-  -H "Authorization: Bearer up_…" \
+  -H "Authorization: Bearer op_…" \
   -d '{"model":"gpt-5-mini","messages":[{"role":"user","content":"Hello!"}]}'
 ```
 
@@ -379,7 +388,7 @@ To see which feature or environment the money goes to, label requests with the `
 header. The proxy stores the tags with the usage event and doesn't send them to the provider.
 
 ```sh
-curl localhost:8080/openai/v1/responses -H "Authorization: Bearer up_…" \
+curl localhost:8080/openai/v1/responses -H "Authorization: Bearer op_…" \
   -H "X-Proxy-Tags: feature=search,env=prod" -d '{"model":"gpt-5-mini","input":"Hello!"}'
 
 curl -s "localhost:8080/admin/usage?group_by=tag:feature&tag:env=prod" -H "$ADMIN"
@@ -411,8 +420,8 @@ When the caller sends a W3C `traceparent` header, the proxy's span joins the cal
 caller's sampling decision wins over `sample_ratio`. Spans are named `chat <model>` and carry the
 OpenTelemetry GenAI attributes (`gen_ai.provider.name`, `gen_ai.request.model`,
 `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`,
-…) plus `ultimate_proxy.*` ones: tenant, application, status, cost in USD, cache status, money lost
-to a cache miss, the request ID (as in `X-Proxy-Request-Id`), time to first token, and each request tag as `ultimate_proxy.tag.<key>`.
+…) plus `omni_proxy.*` ones: tenant, application, status, cost in USD, cache status, money lost
+to a cache miss, the request ID (as in `X-Proxy-Request-Id`), time to first token, and each request tag as `omni_proxy.tag.<key>`.
 
 Spans never contain prompts or outputs. The end user's email is left out unless `include_user` is
 on, since tracing backends are often readable by more people than the dashboard.
@@ -442,7 +451,7 @@ Counters live in Valkey when `redis_url` is set (the compose stack runs one; Red
 too, see [Using your own Redis or Dragonfly](#using-your-own-redis-or-dragonfly)), and every replica shares
 them with one round trip per request. Without it each proxy counts on its own, so set it when running
 more than one. If Valkey is unreachable, requests are let through and
-`ultimate_proxy_limiter_errors_total` counts it; `limits.fail_closed: true` refuses them instead.
+`omni_proxy_limiter_errors_total` counts it; `limits.fail_closed: true` refuses them instead.
 Rules are cached in each proxy and reread every 10 seconds, so the database is never on the request
 path.
 
@@ -540,8 +549,8 @@ curl -s "localhost:8080/admin/insights?status=all" -H "$ADMIN"       # open and 
 Set `insights.webhook_url` for a JSON POST (`{"event":"insight.opened","insight":{…}}`) or
 `insights.slack_webhook_url` for a Slack message on every open and resolve (and when a budget
 insight turns critical, `insight.escalated`). Prometheus gets
-`ultimate_proxy_cache_requests_total{status}`, `ultimate_proxy_cache_missed_tokens_total`,
-`ultimate_proxy_cost_usd_total` and `ultimate_proxy_insights_open{kind}`.
+`omni_proxy_cache_requests_total{status}`, `omni_proxy_cache_missed_tokens_total`,
+`omni_proxy_cost_usd_total` and `omni_proxy_insights_open{kind}`.
 
 The fingerprint memory lives in each proxy process, so with several replicas each one judges only the
 traffic it sees. That is fine for rates; a shared store can come later if needed.
@@ -558,6 +567,12 @@ scripts/compliance.sh <openresponses checkout>        # official compliance suit
 
 `cmd/fake-upstream` is a deterministic fake of the OpenAI Responses and Chat Completions APIs, so tests
 and CI need no provider credentials.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to send changes and how releases are made.
+
+## Security
+
+Please report vulnerabilities privately, as [SECURITY.md](SECURITY.md) describes.
 
 ## License
 

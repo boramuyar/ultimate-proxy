@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))

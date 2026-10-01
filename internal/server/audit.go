@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/adminauth"
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/adminauth"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 // auditActions names the admin API's changes, by route pattern.

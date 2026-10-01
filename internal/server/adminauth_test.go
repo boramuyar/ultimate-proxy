@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/config"
-	"github.com/boramuyar/ultimate-proxy/internal/fakeoidc"
-	"github.com/boramuyar/ultimate-proxy/internal/meter"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/config"
+	"github.com/omni-proxy/omni-proxy/internal/fakeoidc"
+	"github.com/omni-proxy/omni-proxy/internal/meter"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 type authHarness struct {
@@ -183,7 +183,7 @@ func TestSessionCookieTampering(t *testing.T) {
 	u, _ := url.Parse(h.proxy.URL)
 	var session *http.Cookie
 	for _, ck := range c.Jar.Cookies(u) {
-		if ck.Name == "up_session" {
+		if ck.Name == "op_session" {
 			session = ck
 		}
 	}
@@ -198,7 +198,7 @@ func TestSessionCookieTampering(t *testing.T) {
 	}
 	for _, v := range []string{forged, payload, "", session.Value + "x"} {
 		req, _ := http.NewRequest("GET", h.proxy.URL+"/admin/tenants", nil)
-		req.AddCookie(&http.Cookie{Name: "up_session", Value: v})
+		req.AddCookie(&http.Cookie{Name: "op_session", Value: v})
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)

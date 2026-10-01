@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/metrics"
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/metrics"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 // KindBudget is a budget that has passed 80% or 100% of its amount.

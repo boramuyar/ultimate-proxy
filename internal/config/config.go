@@ -285,7 +285,7 @@ func (c *Config) applyDefaults() {
 		c.Usage.RetentionDays = &days
 	}
 	if c.Tracing.ServiceName == "" {
-		c.Tracing.ServiceName = "ultimate-proxy"
+		c.Tracing.ServiceName = "omni-proxy"
 	}
 	if c.Tracing.SampleRatio == nil {
 		all := 1.0

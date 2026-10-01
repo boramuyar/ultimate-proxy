@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/insights"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/insights"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 var longText = strings.Repeat("You are a careful support assistant. ", 20)

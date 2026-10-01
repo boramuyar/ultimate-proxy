@@ -24,8 +24,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
-	"github.com/boramuyar/ultimate-proxy/internal/config"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/config"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 // Tracer starts and ends model call spans.
@@ -71,7 +71,7 @@ func New(cfg config.Tracing) (*Tracer, error) {
 		// Follow the caller's sampling decision when it sent one.
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(*cfg.SampleRatio))),
 	)
-	return &Tracer{tracer: tp.Tracer("github.com/boramuyar/ultimate-proxy"), provider: tp, includeUser: cfg.IncludeUser}, nil
+	return &Tracer{tracer: tp.Tracer("github.com/omni-proxy/omni-proxy"), provider: tp, includeUser: cfg.IncludeUser}, nil
 }
 
 // Shutdown sends the spans still queued.
@@ -105,34 +105,34 @@ func (t *Tracer) End(span trace.Span, ev *store.UsageEvent, tenant, app string) 
 		return
 	}
 	attrs := []attribute.KeyValue{
-		attribute.String("ultimate_proxy.request_id", ev.RequestID),
+		attribute.String("omni_proxy.request_id", ev.RequestID),
 		attribute.Int("gen_ai.usage.input_tokens", ev.InputTokens),
 		attribute.Int("gen_ai.usage.output_tokens", ev.OutputTokens),
 		attribute.Int("gen_ai.usage.cache_read.input_tokens", ev.CachedInputTokens),
 		attribute.Int("gen_ai.usage.cache_creation.input_tokens", ev.CacheWriteTokens),
 		attribute.Int("http.response.status_code", ev.HTTPStatus),
-		attribute.Bool("ultimate_proxy.stream", ev.Stream),
-		attribute.String("ultimate_proxy.status", ev.Status),
-		attribute.String("ultimate_proxy.tenant", tenant),
-		attribute.String("ultimate_proxy.application", app),
-		attribute.Float64("ultimate_proxy.cost_usd", ev.CostUSD),
+		attribute.Bool("omni_proxy.stream", ev.Stream),
+		attribute.String("omni_proxy.status", ev.Status),
+		attribute.String("omni_proxy.tenant", tenant),
+		attribute.String("omni_proxy.application", app),
+		attribute.Float64("omni_proxy.cost_usd", ev.CostUSD),
 	}
 	if ev.CacheStatus != "" {
 		attrs = append(attrs,
-			attribute.String("ultimate_proxy.cache_status", ev.CacheStatus),
-			attribute.Float64("ultimate_proxy.missed_cost_usd", ev.MissedCostUSD))
+			attribute.String("omni_proxy.cache_status", ev.CacheStatus),
+			attribute.Float64("omni_proxy.missed_cost_usd", ev.MissedCostUSD))
 	}
 	if ev.ReasoningTokens > 0 {
 		attrs = append(attrs, attribute.Int("gen_ai.usage.reasoning.output_tokens", ev.ReasoningTokens))
 	}
 	if ev.TTFTMS != nil {
-		attrs = append(attrs, attribute.Int("ultimate_proxy.ttft_ms", *ev.TTFTMS))
+		attrs = append(attrs, attribute.Int("omni_proxy.ttft_ms", *ev.TTFTMS))
 	}
 	if t.includeUser && ev.UserEmail != "" {
 		attrs = append(attrs, attribute.String("user.email", ev.UserEmail))
 	}
 	for k, v := range ev.Tags {
-		attrs = append(attrs, attribute.String("ultimate_proxy.tag."+k, v))
+		attrs = append(attrs, attribute.String("omni_proxy.tag."+k, v))
 	}
 	span.SetAttributes(attrs...)
 	if ev.Status == "failed" || ev.Status == "rejected" || ev.HTTPStatus >= 400 {

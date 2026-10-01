@@ -12,4 +12,4 @@ bootstrap:
   - tenant: ci
     applications:
       - name: compliance
-        keys: ["up_ci_test_key"]
+        keys: ["op_ci_test_key"]

@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/config"
-	"github.com/boramuyar/ultimate-proxy/internal/fakeupstream"
-	"github.com/boramuyar/ultimate-proxy/internal/meter"
-	"github.com/boramuyar/ultimate-proxy/internal/sse"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/config"
+	"github.com/omni-proxy/omni-proxy/internal/fakeupstream"
+	"github.com/omni-proxy/omni-proxy/internal/meter"
+	"github.com/omni-proxy/omni-proxy/internal/sse"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 type harness struct {
@@ -29,8 +29,8 @@ type harness struct {
 }
 
 const (
-	trustedKey   = "up_test_trusted"
-	untrustedKey = "up_test_untrusted"
+	trustedKey   = "op_test_trusted"
+	untrustedKey = "op_test_untrusted"
 	adminToken   = "admin"
 )
 
@@ -289,7 +289,7 @@ func TestErrors(t *testing.T) {
 		status                int
 		code                  string
 	}{
-		{"bad key", "/openai/v1/responses", "up_nope", `{"model":"gpt","input":"hi"}`, 401, "invalid_api_key"},
+		{"bad key", "/openai/v1/responses", "op_nope", `{"model":"gpt","input":"hi"}`, 401, "invalid_api_key"},
 		{"upstream 404", "/openai/v1/responses", trustedKey, `{"model":"missing-model","input":"hi"}`, 400, "model_not_found"},
 		{"upstream auth", "/badkey/v1/responses", trustedKey, `{"model":"gpt-fake","input":"hi"}`, 502, "upstream_auth_failed"},
 		{"bad json", "/openai/v1/responses", trustedKey, `{`, 400, "invalid_json"},
@@ -328,7 +328,7 @@ func TestAdminKeysAndUsage(t *testing.T) {
 	_, tenant := admin("POST", "/admin/tenants", `{"name":"initech"}`)
 	_, app := admin("POST", "/admin/tenants/"+tenant["id"].(string)+"/applications", `{"name":"tps"}`)
 	status, key := admin("POST", "/admin/applications/"+app["id"].(string)+"/keys", ``)
-	if status != 201 || !strings.HasPrefix(key["key"].(string), "up_") {
+	if status != 201 || !strings.HasPrefix(key["key"].(string), "op_") {
 		t.Fatalf("key not created: %d %v", status, key)
 	}
 	decode(t, h.post(key["key"].(string), `{"model":"gpt","input":"hi"}`, "X-Proxy-User-Email", "peter@initech.com"))
@@ -370,7 +370,7 @@ func TestModelsPassThrough(t *testing.T) {
 	if resp.StatusCode != 200 || body["data"].([]any)[0].(map[string]any)["id"] != "gpt-fake" {
 		t.Fatalf("models: %d %v", resp.StatusCode, body)
 	}
-	if resp := get("/openai/v1/models", "up_nope"); resp.StatusCode != 401 {
+	if resp := get("/openai/v1/models", "op_nope"); resp.StatusCode != 401 {
 		t.Errorf("models without a valid key: %d", resp.StatusCode)
 	}
 	if resp := get("/badkey/v1/models", trustedKey); resp.StatusCode != 401 {

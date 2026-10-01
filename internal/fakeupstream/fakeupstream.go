@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/sse"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/sse"
 )
 
 // Triggers placed in the last user message.

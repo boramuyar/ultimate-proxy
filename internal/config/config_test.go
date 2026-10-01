@@ -47,7 +47,7 @@ func TestProviderValidation(t *testing.T) {
 
 func TestTracingValidation(t *testing.T) {
 	cfg, err := Parse([]byte("tracing: {endpoint: http://otel:4318}"))
-	if err != nil || cfg.Tracing.ServiceName != "ultimate-proxy" || *cfg.Tracing.SampleRatio != 1 {
+	if err != nil || cfg.Tracing.ServiceName != "omni-proxy" || *cfg.Tracing.SampleRatio != 1 {
 		t.Fatalf("defaults: %+v %v", cfg, err)
 	}
 	for yaml, want := range map[string]string{

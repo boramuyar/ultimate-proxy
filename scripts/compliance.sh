@@ -12,12 +12,12 @@ SPEC_DIR=${1:?usage: scripts/compliance.sh <openresponses checkout>}
 TESTS=basic-response,assistant-phase,response-output-phase-schema,streaming-response,system-prompt,tool-calling,image-input,multi-turn
 BIN=$(mktemp -d)
 
-go build -o "$BIN/ultimate-proxy" ./cmd/ultimate-proxy
+go build -o "$BIN/omni-proxy" ./cmd/omni-proxy
 go build -o "$BIN/fake-upstream" ./cmd/fake-upstream
 
 "$BIN/fake-upstream" -listen :9090 &
 FAKE=$!
-"$BIN/ultimate-proxy" -config deploy/ci.config.yaml &
+"$BIN/omni-proxy" -config deploy/ci.config.yaml &
 PROXY=$!
 trap 'kill $FAKE $PROXY 2>/dev/null || true' EXIT
 
@@ -28,4 +28,4 @@ done
 
 (cd "$SPEC_DIR" && bun install --frozen-lockfile >/dev/null)
 (cd "$SPEC_DIR" && bun run bin/compliance-test.ts \
-  --base-url http://localhost:8080/fake/v1 --api-key up_ci_test_key --model gpt-fake --filter "$TESTS")
+  --base-url http://localhost:8080/fake/v1 --api-key op_ci_test_key --model gpt-fake --filter "$TESTS")

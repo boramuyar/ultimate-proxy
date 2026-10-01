@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/metrics"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/metrics"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 type Meter struct {

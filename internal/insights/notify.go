@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 // Notifier is told when an insight opens or resolves. It must not block.

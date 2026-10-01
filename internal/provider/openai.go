@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/sse"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/sse"
 )
 
 // OpenAI forwards requests to any upstream that already speaks Open Responses

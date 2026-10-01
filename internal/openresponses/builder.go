@@ -20,16 +20,13 @@ type Builder struct {
 	Resp  *Response
 	sink  Sink
 	seq   int
-	texts []*strings.Builder // per output index: message text, reasoning text or call arguments
+	texts []*strings.Builder // per output index: message text or call arguments
 	err   error
 }
 
 func NewBuilder(resp *Response, sink Sink) *Builder {
 	return &Builder{Resp: resp, sink: sink}
 }
-
-// Err returns the first sink error (for example, the client disconnected).
-func (b *Builder) Err() error { return b.err }
 
 func (b *Builder) emit(typ string, v any) {
 	if b.sink == nil || b.err != nil {
@@ -179,41 +176,6 @@ func (b *Builder) EndFunctionCall(idx int, status string) {
 	b.done(idx)
 }
 
-// StartReasoning adds a reasoning item with one reasoning_text part.
-func (b *Builder) StartReasoning() int {
-	r := &ReasoningItem{Type: "reasoning", ID: NewID("rs"), Summary: []ReasoningText{}}
-	idx := b.add(r)
-	b.emit("response.content_part.added", &partEvent{"response.content_part.added", b.seq, r.ID, idx, 0, &ReasoningText{Type: "reasoning_text"}})
-	return idx
-}
-
-func (b *Builder) ReasoningDelta(idx int, delta string) {
-	r := b.Resp.Output[idx].(*ReasoningItem)
-	b.texts[idx].WriteString(delta)
-	b.emit("response.reasoning.delta", &textDeltaEvent{"response.reasoning.delta", b.seq, r.ID, idx, 0, delta, nil})
-}
-
-// EndReasoning finalizes a reasoning item. encrypted carries opaque provider
-// state needed to replay the reasoning in later turns (may be nil).
-func (b *Builder) EndReasoning(idx int, encrypted *string) {
-	r := b.Resp.Output[idx].(*ReasoningItem)
-	text := b.texts[idx].String()
-	part := ReasoningText{Type: "reasoning_text", Text: text}
-	b.emit("response.reasoning.done", &textDoneEvent{"response.reasoning.done", b.seq, r.ID, idx, 0, text, nil})
-	b.emit("response.content_part.done", &partEvent{"response.content_part.done", b.seq, r.ID, idx, 0, &part})
-	r.Content = []ReasoningText{part}
-	r.EncryptedContent = encrypted
-	b.done(idx)
-}
-
-// AddReasoning adds a finished reasoning item with no visible text, such as
-// redacted thinking.
-func (b *Builder) AddReasoning(encrypted *string) {
-	r := &ReasoningItem{Type: "reasoning", ID: NewID("rs"), Summary: []ReasoningText{}, EncryptedContent: encrypted}
-	idx := b.add(r)
-	b.done(idx)
-}
-
 // Complete sets usage and the terminal status and emits the terminal event.
 // incompleteReason is empty for a completed response.
 func (b *Builder) Complete(usage *Usage, incompleteReason string) *Response {
@@ -240,6 +202,3 @@ func (b *Builder) Fail(e *APIError) *Response {
 	b.emit("response.failed", &responseEvent{"response.failed", b.seq, b.Resp})
 	return b.Resp
 }
-
-// Seq returns the next sequence number.
-func (b *Builder) Seq() int { return b.seq }

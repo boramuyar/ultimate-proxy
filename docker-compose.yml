@@ -11,7 +11,11 @@
 #
 # Settings come from .env (copy .env.example). Without one, the defaults
 # below are used, which are fine on your own machine but not on a server.
-name: ultimate-proxy
+#
+# `docker compose up -d --build` builds the images from this checkout. To run
+# a published release instead, set OMNI_PROXY_VERSION (such as 0.1.0) and run
+# `docker compose pull && docker compose up -d`.
+name: omni-proxy
 
 services:
   postgres:
@@ -49,12 +53,19 @@ services:
       retries: 30
 
   fake-upstream:
-    build: .
+    # The proxy's image also holds the fake provider.
+    image: ghcr.io/omni-proxy/omni-proxy:${OMNI_PROXY_VERSION:-dev}
+    build:
+      context: .
+      args: {VERSION: "${OMNI_PROXY_VERSION:-dev}"}
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/fake-upstream", "-listen", ":9090", "-api-key", "fake-key"]
 
   proxy:
-    build: .
+    image: ghcr.io/omni-proxy/omni-proxy:${OMNI_PROXY_VERSION:-dev}
+    build:
+      context: .
+      args: {VERSION: "${OMNI_PROXY_VERSION:-dev}"}
     restart: unless-stopped
     ports: ["${PROXY_PORT:-8080}:8080"]
     environment:
@@ -77,7 +88,7 @@ services:
       OIDC_VIEWER_DOMAINS: ${OIDC_VIEWER_DOMAINS:-}
       OIDC_VIEWER_GROUPS: ${OIDC_VIEWER_GROUPS:-}
       OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-}
-      DEMO_APP_KEY: ${DEMO_APP_KEY:-up_demo_key}
+      DEMO_APP_KEY: ${DEMO_APP_KEY:-op_demo_key}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TRACING_ENDPOINT: ${TRACING_ENDPOINT:-}
       TRACING_AUTHORIZATION: ${TRACING_AUTHORIZATION:-}
@@ -85,10 +96,10 @@ services:
     # this machine, as redis://host.docker.internal:6379/0.
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
-      - ./deploy/compose/config.yaml:/etc/ultimate-proxy/config.yaml:ro
-      - ./deploy/compose/certs:/etc/ultimate-proxy/certs:ro
+      - ./deploy/compose/config.yaml:/etc/omni-proxy/config.yaml:ro
+      - ./deploy/compose/certs:/etc/omni-proxy/certs:ro
     healthcheck:
-      test: ["CMD", "/usr/local/bin/ultimate-proxy", "-healthcheck", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "/usr/local/bin/omni-proxy", "-healthcheck", "http://127.0.0.1:8080/healthz"]
       interval: 2s
       retries: 30
     depends_on:
@@ -98,6 +109,7 @@ services:
       fake-upstream: {condition: service_started}
 
   dashboard:
+    image: ghcr.io/omni-proxy/dashboard:${OMNI_PROXY_VERSION:-dev}
     build: ./web
     restart: unless-stopped
     ports: ["${DASHBOARD_PORT:-3000}:80"]

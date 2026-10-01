@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/boramuyar/ultimate-proxy/internal/fakeoidc"
+	"github.com/omni-proxy/omni-proxy/internal/fakeoidc"
 )
 
 func TestKeySetRefetchesAtMostEveryInterval(t *testing.T) {
