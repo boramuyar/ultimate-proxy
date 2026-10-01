@@ -49,6 +49,10 @@ func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// TagsHeader carries the caller's labels for a request, such as
+// feature=search,env=prod. It is not sent upstream.
+const TagsHeader = "X-Proxy-Tags"
+
 // exchange is one model call through the proxy, from the caller's request to
 // its usage event.
 type exchange struct {
@@ -93,11 +97,18 @@ func (s *Server) admit(w http.ResponseWriter, r *http.Request, p *provider.OpenA
 		openresponses.WriteError(w, errModelNotAllowed(req.Model))
 		return nil
 	}
+	tags, err := store.ParseTags(r.Header.Get(TagsHeader))
+	if err != nil {
+		openresponses.WriteError(w, openresponses.NewError(http.StatusBadRequest, openresponses.ErrInvalidRequest, "invalid_tags",
+			TagsHeader+": "+err.Error(), ""))
+		return nil
+	}
 	email, source := identity.ResolveUser(id, r, req)
 	x.ev = store.UsageEvent{
 		TS: x.start.UTC(), RequestID: openresponses.NewID("resp"), TenantID: id.TenantID, AppID: id.AppID, KeyID: id.KeyID(),
 		AuthMethod: id.Method, Subject: id.Subject, UserEmail: email, UserSource: source,
 		Model: req.Model, Provider: p.Name(), UpstreamModel: req.Model, Stream: req.Stream, HTTPStatus: http.StatusOK,
+		Tags: tags,
 	}
 	if req.PromptCacheKey != nil {
 		x.ev.PromptCacheKey = *req.PromptCacheKey

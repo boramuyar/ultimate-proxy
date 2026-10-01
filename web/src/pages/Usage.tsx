@@ -26,19 +26,27 @@ const DIMS: { key: Dimension; label: string }[] = [
 
 type Filters = NonNullable<UsageParams["filters"]>;
 const ALL = "__all";
+const TAG_KEY = /^[a-z0-9_.-]{1,40}$/;
 
 export default function Usage({ range, setRange }: PageProps) {
   const dir = useDirectory();
   const [groupBy, setGroupBy] = useState<Dimension[]>(["tenant", "application", "email"]);
   const [byTime, setByTime] = useState(false);
   const [filters, setFilters] = useState<Filters>({});
+  // Request tags: a key to group by, and a key=value to filter on.
+  const [tagKey, setTagKey] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [from, to] = rangeBounds(range);
   const gran = byTime ? RANGES[range].granularity : undefined;
-  const rows = useAsync(() => api.usage({ from, to, groupBy, granularity: gran, filters }), [range, from.getTime(), groupBy.join(), gran, JSON.stringify(filters)]);
+  const tagDim: Dimension | undefined = TAG_KEY.test(tagKey.trim()) ? `tag:${tagKey.trim()}` : undefined;
+  const dims = tagDim ? [...groupBy, tagDim] : groupBy;
+  const [fk, fv] = tagFilter.split("=").map((s) => s.trim());
+  const allFilters: Filters = TAG_KEY.test(fk ?? "") && fv ? { ...filters, [`tag:${fk}`]: fv } : filters;
+  const rows = useAsync(() => api.usage({ from, to, groupBy: dims, granularity: gran, filters: allFilters }), [range, from.getTime(), dims.join(), gran, JSON.stringify(allFilters)]);
 
   const setFilter = (k: keyof Filters, v: string) => setFilters((f) => ({ ...f, [k]: v && v !== ALL ? v : undefined }));
-  // Keep the chosen dimensions in a stable column order.
-  const cols = DIMS.filter((d) => groupBy.includes(d.key));
+  // Keep the chosen dimensions in a stable column order, the tag last.
+  const cols = [...DIMS.filter((d) => groupBy.includes(d.key)), ...(tagDim ? [{ key: tagDim, label: tagKey.trim() }] : [])];
 
   const label = (r: UsageRow, d: Dimension) => {
     const v = r.group[d] ?? "";
@@ -96,12 +104,20 @@ export default function Usage({ range, setRange }: PageProps) {
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
+            <Input
+              aria-label="Group by tag"
+              className="h-8 w-40"
+              placeholder="+ tag key"
+              value={tagKey}
+              onChange={(e) => setTagKey(e.target.value)}
+              title="Group by a request tag, sent in the X-Proxy-Tags header"
+            />
             <Label className="ml-2 cursor-pointer text-foreground">
               <Checkbox checked={byTime} onCheckedChange={(v) => setByTime(v === true)} />
               Per {RANGES[range].granularity}
             </Label>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto] lg:items-end">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto] lg:items-end">
             <div className="grid gap-1.5">
               <Label>Tenant</Label>
               <Select value={filters.tenant_id ?? ALL} onValueChange={(v) => setFilter("tenant_id", v)}>
@@ -143,6 +159,10 @@ export default function Usage({ range, setRange }: PageProps) {
             <div className="grid gap-1.5">
               <Label htmlFor="f-model">Model</Label>
               <Input id="f-model" placeholder="any" value={filters.model ?? ""} onChange={(e) => setFilter("model", e.target.value)} />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="f-tag">Tag</Label>
+              <Input id="f-tag" placeholder="feature=search" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} />
             </div>
             <Button variant="outline" onClick={exportCSV} disabled={!rows.data?.length}>
               <Download /> CSV

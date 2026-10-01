@@ -100,7 +100,7 @@ export interface KeyPolicy {
   allowed_models?: string[] | null;
 }
 
-export type Dimension = "tenant" | "application" | "email" | "model" | "provider" | "cache";
+export type Dimension = "tenant" | "application" | "email" | "model" | "provider" | "cache" | `tag:${string}`;
 
 export interface UsageRow {
   bucket?: string;
@@ -121,7 +121,7 @@ export interface UsageParams {
   to: Date;
   groupBy: Dimension[];
   granularity?: "hour" | "day";
-  filters?: Partial<Record<"tenant_id" | "application_id" | "email" | "model" | "provider" | "cache_status", string>>;
+  filters?: Partial<Record<"tenant_id" | "application_id" | "email" | "model" | "provider" | "cache_status" | `tag:${string}`, string>>;
 }
 
 export interface Insight {

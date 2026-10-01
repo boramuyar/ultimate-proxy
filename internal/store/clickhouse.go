@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS usage_events (
     cache_status           LowCardinality(String),
     expected_cached_tokens Int32,
     auth_method            LowCardinality(String),
-    subject                String
+    subject                String,
+    tags                   String
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMM(ts)
 ORDER BY (toDate(ts), tenant_id, app_id, ts)`
@@ -93,11 +94,13 @@ ORDER BY (toDate(ts), tenant_id, app_id, ts)`
 const clickhouseAddColumns = `
 ALTER TABLE usage_events
     ADD COLUMN IF NOT EXISTS auth_method LowCardinality(String),
-    ADD COLUMN IF NOT EXISTS subject String`
+    ADD COLUMN IF NOT EXISTS subject String,
+    ADD COLUMN IF NOT EXISTS tags String`
 
 // The hourly rollup has one row per hour and combination of the dimensions
 // usage can be grouped by. Background merges add rows with the same key
-// together, but not right away, so queries still sum.
+// together, but not right away, so queries still sum. Tags are kept in their
+// canonical "k=v,k=v" form (see FormatTags) and split apart at query time.
 const clickhouseRollupSchema = `
 CREATE TABLE IF NOT EXISTS usage_hourly (
     hour                DateTime('UTC'),
@@ -107,6 +110,7 @@ CREATE TABLE IF NOT EXISTS usage_hourly (
     model               LowCardinality(String),
     provider            LowCardinality(String),
     cache_status        LowCardinality(String),
+    tags                String,
     requests            UInt64,
     failed_requests     UInt64,
     input_tokens        Int64,
@@ -117,13 +121,20 @@ CREATE TABLE IF NOT EXISTS usage_hourly (
     cost_usd            Float64
 ) ENGINE = SummingMergeTree
 PARTITION BY toYYYYMM(hour)
-ORDER BY (hour, tenant_id, app_id, user_email, model, provider, cache_status)`
+ORDER BY (hour, tenant_id, app_id, user_email, model, provider, cache_status, tags)`
+
+// Adds tags to a rollup made before they existed. A new column may only join
+// the sorting key in the ALTER that adds it.
+const clickhouseRollupAddTags = `
+ALTER TABLE usage_hourly
+    ADD COLUMN tags String AFTER cache_status,
+    MODIFY ORDER BY (hour, tenant_id, app_id, user_email, model, provider, cache_status, tags)`
 
 // The materialized view fills the rollup on every insert into usage_events.
 const clickhouseRollupView = `
 CREATE MATERIALIZED VIEW IF NOT EXISTS usage_hourly_mv TO usage_hourly AS
 SELECT
-    toStartOfHour(ts) AS hour, tenant_id, app_id, user_email, model, provider, cache_status,
+    toStartOfHour(ts) AS hour, tenant_id, app_id, user_email, model, provider, cache_status, tags,
     count() AS requests,
     countIf(status = 'failed') AS failed_requests,
     sum(toInt64(input_tokens)) AS input_tokens,
@@ -133,7 +144,7 @@ SELECT
     sum(toInt64(reasoning_tokens)) AS reasoning_tokens,
     sum(cost_usd) AS cost_usd
 FROM usage_events
-GROUP BY hour, tenant_id, app_id, user_email, model, provider, cache_status`
+GROUP BY hour, tenant_id, app_id, user_email, model, provider, cache_status, tags`
 
 // NewClickHouse connects to a URL like http://user:password@host:8123/database,
 // creates the database and tables if they are missing, and sets raw events to
@@ -158,15 +169,56 @@ func NewClickHouse(ctx context.Context, rawURL string, retentionDays int) (*Clic
 	if err := c.exec(ctx, "CREATE DATABASE IF NOT EXISTS "+quoteIdent(c.db), nil, ""); err != nil {
 		return nil, fmt.Errorf("connect to clickhouse: %w", err)
 	}
-	for _, stmt := range []string{clickhouseSchema, clickhouseAddColumns, clickhouseRollupSchema, clickhouseRollupView} {
+	for _, stmt := range []string{clickhouseSchema, clickhouseAddColumns, clickhouseRollupSchema} {
 		if err := c.exec(ctx, stmt, nil, c.db); err != nil {
 			return nil, fmt.Errorf("apply clickhouse schema: %w", err)
 		}
+	}
+	if err := c.upgradeRollup(ctx); err != nil {
+		return nil, fmt.Errorf("apply clickhouse schema: %w", err)
+	}
+	if err := c.exec(ctx, clickhouseRollupView, nil, c.db); err != nil {
+		return nil, fmt.Errorf("apply clickhouse schema: %w", err)
 	}
 	if err := c.setRetention(ctx, retentionDays); err != nil {
 		return nil, fmt.Errorf("set clickhouse retention: %w", err)
 	}
 	return c, nil
+}
+
+// upgradeRollup adds tags to a rollup and view made before they existed. The
+// view is dropped and made again by the caller; inserts in between miss the
+// rollup, which only happens once, at the upgrade.
+func (c *ClickHouse) upgradeRollup(ctx context.Context) error {
+	cols, err := c.queryString(ctx, "SELECT name FROM system.columns WHERE database = {db:String} AND table = 'usage_hourly' AND name = 'tags'")
+	if err != nil {
+		return err
+	}
+	if cols == "" {
+		if err := c.exec(ctx, clickhouseRollupAddTags, nil, c.db); err != nil {
+			return err
+		}
+	}
+	view, err := c.queryString(ctx, "SELECT create_table_query FROM system.tables WHERE database = {db:String} AND name = 'usage_hourly_mv'")
+	if err != nil {
+		return err
+	}
+	if view != "" && !strings.Contains(view, "tags") {
+		return c.exec(ctx, "DROP VIEW IF EXISTS usage_hourly_mv", nil, c.db)
+	}
+	return nil
+}
+
+// queryString runs a query with the database as {db:String} and returns its
+// output, trimmed.
+func (c *ClickHouse) queryString(ctx context.Context, sql string) (string, error) {
+	rc, err := c.do(ctx, sql, url.Values{"param_db": {c.db}}, "", nil)
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(rc)
+	return strings.TrimSpace(string(b)), err
 }
 
 // setRetention changes the raw events' TTL only when it differs from the
@@ -268,6 +320,7 @@ type chUsageEvent struct {
 	ExpectedCachedTokens int     `json:"expected_cached_tokens"`
 	AuthMethod           string  `json:"auth_method"`
 	Subject              string  `json:"subject"`
+	Tags                 string  `json:"tags"`
 }
 
 func (c *ClickHouse) InsertUsage(ctx context.Context, events []UsageEvent) error {
@@ -286,6 +339,7 @@ func (c *ClickHouse) InsertUsage(ctx context.Context, events []UsageEvent) error
 			OutputTokens: e.OutputTokens, ReasoningTokens: e.ReasoningTokens, UsageReported: e.UsageReported,
 			LatencyMS: e.LatencyMS, TTFTMS: e.TTFTMS, PromptCacheKey: e.PromptCacheKey, CostUSD: e.CostUSD,
 			CacheStatus: e.CacheStatus, ExpectedCachedTokens: e.ExpectedCachedTokens, AuthMethod: e.AuthMethod, Subject: e.Subject,
+			Tags: FormatTags(e.Tags),
 		}); err != nil {
 			return err
 		}
@@ -329,10 +383,10 @@ func (c *ClickHouse) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, 
 		name := fmt.Sprintf("f%d", i)
 		i++
 		params.Set("param_"+name, v)
-		filters = append(filters, fmt.Sprintf(" AND %s = {%s:String}", UsageDimensions[k], name))
+		filters = append(filters, fmt.Sprintf(" AND %s = {%s:String}", chDimension(k), name))
 	}
 	filter := strings.Join(filters, "")
-	dims := "tenant_id, app_id, user_email, model, provider, cache_status"
+	dims := "tenant_id, app_id, user_email, model, provider, cache_status, tags"
 	source := `SELECT toDateTime64(hour, 3, 'UTC') AS t, ` + dims + `, requests, failed_requests, input_tokens,
 		cached_input_tokens, cache_write_tokens, output_tokens, reasoning_tokens, cost_usd
 	FROM usage_hourly
@@ -355,7 +409,7 @@ func (c *ClickHouse) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, 
 		group = append(group, "1")
 	}
 	for _, g := range q.GroupBy {
-		sel = append(sel, "toString("+UsageDimensions[g]+")")
+		sel = append(sel, "toString("+chDimension(g)+")")
 		group = append(group, fmt.Sprint(len(sel)))
 	}
 	sel = append(sel,
@@ -404,6 +458,15 @@ func (c *ClickHouse) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, 
 	}
 	sortRows(out)
 	return out, nil
+}
+
+// chDimension is the column or expression for a validated dimension. Tag keys
+// are limited to [a-z0-9_.-], so they are safe to quote inline.
+func chDimension(d string) string {
+	if k, ok := TagDimension(d); ok {
+		return "extractKeyValuePairs(tags, '=', ',')['" + k + "']"
+	}
+	return UsageDimensions[d]
 }
 
 func quoteIdent(s string) string { return "`" + strings.ReplaceAll(s, "`", "``") + "`" }

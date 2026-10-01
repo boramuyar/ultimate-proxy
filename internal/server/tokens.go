@@ -147,7 +147,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h.Set("Access-Control-Expose-Headers", "X-Proxy-Request-Id")
 			if r.Method == http.MethodOptions {
 				h.Set("Access-Control-Allow-Methods", "GET, POST")
-				h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+identity.UserHeader)
+				h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+identity.UserHeader+", "+TagsHeader)
 				h.Set("Access-Control-Max-Age", "600")
 			}
 		}

@@ -209,7 +209,7 @@ var usageColumns = []string{
 	"ts", "request_id", "tenant_id", "app_id", "key_id", "user_email", "user_source", "model", "provider",
 	"upstream_model", "stream", "status", "error_code", "http_status", "input_tokens", "cached_input_tokens",
 	"cache_write_tokens", "output_tokens", "reasoning_tokens", "usage_reported", "latency_ms", "ttft_ms",
-	"prompt_cache_key", "cost_usd", "cache_status", "expected_cached_tokens", "auth_method", "subject",
+	"prompt_cache_key", "cost_usd", "cache_status", "expected_cached_tokens", "auth_method", "subject", "tags",
 }
 
 func (p *Postgres) InsertUsage(ctx context.Context, events []UsageEvent) error {
@@ -220,7 +220,7 @@ func (p *Postgres) InsertUsage(ctx context.Context, events []UsageEvent) error {
 				e.TS, e.RequestID, e.TenantID, e.AppID, e.KeyID, e.UserEmail, e.UserSource, e.Model, e.Provider,
 				e.UpstreamModel, e.Stream, e.Status, e.ErrorCode, e.HTTPStatus, e.InputTokens, e.CachedInputTokens,
 				e.CacheWriteTokens, e.OutputTokens, e.ReasoningTokens, e.UsageReported, e.LatencyMS, e.TTFTMS,
-				e.PromptCacheKey, e.CostUSD, e.CacheStatus, e.ExpectedCachedTokens, e.AuthMethod, e.Subject,
+				e.PromptCacheKey, e.CostUSD, e.CacheStatus, e.ExpectedCachedTokens, e.AuthMethod, e.Subject, pgTags(e.Tags),
 			}, nil
 		}))
 	return err
@@ -237,12 +237,12 @@ func (p *Postgres) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, er
 		group = append(group, "1")
 	}
 	for _, g := range q.GroupBy {
-		sel = append(sel, UsageDimensions[g])
+		sel = append(sel, pgDimension(g))
 		group = append(group, fmt.Sprint(len(sel)))
 	}
 	for k, v := range q.Filters {
 		args = append(args, v)
-		where = append(where, fmt.Sprintf("%s = $%d", UsageDimensions[k], len(args)))
+		where = append(where, fmt.Sprintf("%s = $%d", pgDimension(k), len(args)))
 	}
 	sel = append(sel,
 		"count(*)", "count(*) FILTER (WHERE status = 'failed')",
@@ -294,6 +294,22 @@ func (p *Postgres) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, er
 	}
 	sortRows(out)
 	return out, nil
+}
+
+// pgDimension is the column or expression for a validated dimension. Tag keys
+// are limited to [a-z0-9_.-], so they are safe to quote inline.
+func pgDimension(d string) string {
+	if k, ok := TagDimension(d); ok {
+		return "coalesce(tags->>'" + k + "', '')"
+	}
+	return UsageDimensions[d]
+}
+
+func pgTags(tags map[string]string) map[string]string {
+	if tags == nil {
+		return map[string]string{}
+	}
+	return tags
 }
 
 func isForeignKeyViolation(err error) bool {

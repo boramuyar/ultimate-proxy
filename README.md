@@ -33,8 +33,8 @@ or fall back to other models: an upstream error reaches the caller as the upstre
   accepted only from applications allowed to name their users.
 - Usage events (tokens in/out, cached, cache writes, reasoning, latency, time to first token) written to
   ClickHouse in batches, off the request path. Tenants, keys, prices and insights stay in Postgres.
-- `GET /admin/usage` to answer "who used how many tokens", grouped by tenant, application, email, model
-  or provider, optionally bucketed by hour or day.
+- `GET /admin/usage` to answer "who used how many tokens", grouped by tenant, application, email, model,
+  provider or your own request tags (`X-Proxy-Tags`), optionally bucketed by hour or day.
 - Prompt-cache diagnosis on every Responses request: whether the cache hit, and if not, why (see
   below). Chat Completions requests record cached tokens but are not diagnosed yet.
 - Insights: problems the proxy notices in live traffic, per application and model, listed at
@@ -259,12 +259,29 @@ curl -s "localhost:8080/admin/usage?group_by=tenant,application,email&granularit
 
 | Parameter | Meaning |
 | --- | --- |
-| `group_by` | Comma-separated: `tenant`, `application`, `email`, `model`, `provider`, `cache`, or `none`. Default `tenant`. |
+| `group_by` | Comma-separated: `tenant`, `application`, `email`, `model`, `provider`, `cache`, `tag:<key>`, or `none`. Default `tenant`. |
 | `from`, `to` | RFC 3339 times. Default: the last 24 hours. |
 | `granularity` | `hour` or `day`. Default: one row per group. |
-| `tenant_id`, `application_id`, `email`, `model`, `provider`, `cache_status` | Filters. |
+| `tenant_id`, `application_id`, `email`, `model`, `provider`, `cache_status`, `tag:<key>` | Filters. |
 
 Each row also carries `cost_usd` when the model had a price at the time of the request.
+
+### Request tags
+
+To see which feature or environment the money goes to, label requests with the `X-Proxy-Tags`
+header. The proxy stores the tags with the usage event and doesn't send them to the provider.
+
+```sh
+curl localhost:8080/openai/v1/responses -H "Authorization: Bearer up_…" \
+  -H "X-Proxy-Tags: feature=search,env=prod" -d '{"model":"gpt-5-mini","input":"Hello!"}'
+
+curl -s "localhost:8080/admin/usage?group_by=tag:feature&tag:env=prod" -H "$ADMIN"
+```
+
+A request carries up to 10 tags. Keys are up to 40 characters of `a-z`, `0-9`, `_`, `-` and `.`.
+Values are up to 100 characters of letters, digits and `_ - . : / @ +`. A malformed header is refused
+with `400 invalid_tags`. The hourly rollup keeps one row per distinct set of tags, so use tags for a
+handful of values each (features, environments, teams), not for request or user IDs.
 
 ## Rate limits
 
