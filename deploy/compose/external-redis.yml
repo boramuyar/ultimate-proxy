@@ -1,0 +1,12 @@
+# Use your own Valkey, Redis 7+ or Dragonfly instead of the bundled Valkey.
+# Set REDIS_URL and add this file in .env:
+#
+#   REDIS_URL=redis://:password@redis.internal:6379/0
+#   COMPOSE_FILE=docker-compose.yml:deploy/compose/external-redis.yml
+services:
+  valkey:
+    # A profile nobody turns on, so the bundled Valkey never starts.
+    profiles: [bundled-valkey]
+  proxy:
+    depends_on:
+      valkey: !reset null

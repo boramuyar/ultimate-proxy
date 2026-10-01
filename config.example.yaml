@@ -8,8 +8,9 @@ database_url: "${DATABASE_URL}"
 # http://user:password@host:8123/database. Leave empty to keep usage in
 # Postgres instead, which is fine for small deployments.
 clickhouse_url: "${CLICKHOUSE_URL}"
-# Valkey (or Redis) for rate limit counters, as redis://host:6379/0. Leave
-# empty to count in each process, which is exact with a single replica.
+# Valkey, Redis 7+ or Dragonfly for rate limit counters, as
+# redis://[:password@]host:6379/0 (rediss:// for TLS). Leave empty to count in
+# each process, which is exact with a single replica.
 redis_url: "${REDIS_URL}"
 # limits:
 #   fail_closed: false     # refuse requests while Valkey is unreachable
