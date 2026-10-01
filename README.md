@@ -1,6 +1,12 @@
-# Omni Proxy
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="Omni Proxy logo" width="120" height="120">
+</p>
 
-[![CI](https://github.com/omni-proxy/omni-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/omni-proxy/omni-proxy/actions/workflows/ci.yml)
+<h1 align="center">Omni Proxy</h1>
+
+<p align="center">
+  <a href="https://github.com/omni-proxy/omni-proxy/actions/workflows/ci.yml"><img src="https://github.com/omni-proxy/omni-proxy/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
 
 A fast, self-hosted LLM gateway: a pass-through proxy for OpenAI-compatible APIs
 ([Responses](https://www.openresponses.org/) and Chat Completions) that controls and meters every

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Omni Proxy">
+  <circle cx="64" cy="64" r="62" fill="#D72631"/>
+  <circle cx="74" cy="64" r="25" fill="none" stroke="#fff" stroke-width="14"/>
+  <path d="M14 48h28M8 64h28M14 80h28" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+</svg>
