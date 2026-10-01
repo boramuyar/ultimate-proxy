@@ -56,7 +56,7 @@ func (s *Server) audit(next http.Handler) http.Handler {
 			e.Action = "unknown"
 		}
 		if p := adminPrincipal(r.Context()); p != nil {
-			e.ActorMethod, e.ActorEmail, e.ActorName = p.Method, p.Email, p.Name
+			e.ActorMethod, e.ActorEmail, e.ActorName, e.ActorRole = p.Method, p.Email, p.Name, p.Role()
 		}
 		switch {
 		case len(body) > maxAuditBody:
@@ -82,13 +82,13 @@ func (s *Server) audit(next http.Handler) http.Handler {
 func (s *Server) auditSignIn(p adminauth.Principal, allowed bool) {
 	e := &store.AuditEntry{
 		ID: openresponses.NewID("aud"), TS: time.Now().UTC(), ActorMethod: p.Method, ActorEmail: p.Email, ActorName: p.Name,
-		Action: "sign_in", Method: http.MethodPost, Path: "/admin/auth/token", Status: http.StatusOK,
+		ActorRole: p.Role(), Action: "sign_in", Method: http.MethodPost, Path: "/admin/auth/token", Status: http.StatusOK,
 	}
 	if p.Method == adminauth.MethodOIDC {
 		e.Method, e.Path = http.MethodGet, "/admin/auth/callback"
 	}
 	if !allowed {
-		e.Action, e.Status = "sign_in.refused", http.StatusForbidden
+		e.Action, e.Status, e.ActorRole = "sign_in.refused", http.StatusForbidden, ""
 	}
 	s.recordAudit(e)
 }

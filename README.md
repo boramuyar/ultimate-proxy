@@ -135,7 +135,8 @@ The dashboard and `/admin` accept two kinds of sign-in, set under `admin:` in th
   OIDC_CLIENT_SECRET=...
   OIDC_REDIRECT_URL=https://proxy.example.com/admin/auth/callback
   OIDC_DISPLAY_NAME=Google                     # the button reads "Continue with Google"
-  OIDC_ALLOWED_DOMAINS=example.com             # and/or OIDC_ALLOWED_EMAILS, OIDC_ALLOWED_GROUPS
+  OIDC_ALLOWED_DOMAINS=example.com             # admins; and/or OIDC_ALLOWED_EMAILS, OIDC_ALLOWED_GROUPS
+  OIDC_VIEWER_GROUPS=finance                   # read-only; and/or OIDC_VIEWER_EMAILS, OIDC_VIEWER_DOMAINS
   ADMIN_SESSION_SECRET=$(openssl rand -base64 32)
   ```
 
@@ -146,13 +147,43 @@ The dashboard and `/admin` accept two kinds of sign-in, set under `admin:` in th
   state and nonce, and verifies the ID token against the provider's keys.
 
   A sign-in becomes a signed, HttpOnly session cookie that lasts `session_ttl` (12 hours by
-  default). The allow lists are checked on every request, so taking someone off a list and
+  default). The allow lists and roles are checked on every request, so taking someone off a list and
   restarting the proxy ends their session. Set `session_secret` so sessions survive restarts and
   work across several proxies.
 
 - **The break-glass token**, `admin.token` (`PROXY_ADMIN_TOKEN`): a bearer token for scripts and
   for when the provider is down. The dashboard offers it under the SSO button. Set it empty to turn
-  it off once single sign-on works.
+  it off once single sign-on works. It always has full admin rights.
+
+### Roles
+
+People on the `allowed_*` lists are full admins. `roles` lets more people in with less:
+
+```yaml
+admin:
+  oidc:
+    allowed_groups: [platform]           # full admins
+    roles:
+      - role: viewer                     # read everything, change nothing
+        groups: [finance]
+      - role: admin                      # run their own tenant: apps, keys, limits
+        groups: [acme-leads]
+        tenants: [acme]
+      - role: viewer                     # read their own tenant
+        domains: [globex.com]
+        tenants: [globex]
+```
+
+| Role | Reads | Changes |
+| --- | --- | --- |
+| admin, every tenant | everything, including the audit log | everything: tenants, prices, tokens |
+| viewer, every tenant | everything, including the audit log | nothing |
+| admin of some tenants | those tenants' usage, insights, keys and limits; prices | those tenants' applications, keys and limits |
+| viewer of some tenants | those tenants' usage, insights, keys and limits; prices | nothing |
+
+Tenants are named by name. Someone matching several entries gets all of them. The proxy checks every
+admin request, and the dashboard hides what the role can't use. Only full admins create tenants, add
+prices or revoke minted tokens, since those belong to no single tenant.
 
 ## Using your own identity provider
 

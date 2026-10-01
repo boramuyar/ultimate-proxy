@@ -244,6 +244,10 @@ func (p *Postgres) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, er
 		args = append(args, v)
 		where = append(where, fmt.Sprintf("%s = $%d", pgDimension(k), len(args)))
 	}
+	if q.TenantIn != nil {
+		args = append(args, q.TenantIn)
+		where = append(where, fmt.Sprintf("tenant_id = ANY($%d)", len(args)))
+	}
 	sel = append(sel,
 		"count(*)", "count(*) FILTER (WHERE status = 'failed')",
 		"coalesce(sum(input_tokens), 0)", "coalesce(sum(cached_input_tokens), 0)",

@@ -243,7 +243,7 @@ func (m *Memory) QueryUsage(_ context.Context, q UsageQuery) ([]UsageRow, error)
 		if e.TS.Before(q.From) || !e.TS.Before(q.To) {
 			continue
 		}
-		if !matches(e, q.Filters) {
+		if !matches(e, q.Filters) || q.TenantIn != nil && !slices.Contains(q.TenantIn, e.TenantID) {
 			continue
 		}
 		var bucket *time.Time

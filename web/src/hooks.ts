@@ -58,6 +58,9 @@ export interface Directory {
   tenantName: (id: string) => string;
   appName: (id: string) => string;
   reload: () => void;
+  // What the signed-in person may change; the proxy checks again anyway.
+  isAdmin: boolean;
+  canWrite: (tenantId: string) => boolean;
 }
 
 export const DirectoryContext = createContext<Directory>({
@@ -66,6 +69,8 @@ export const DirectoryContext = createContext<Directory>({
   tenantName: (id) => id,
   appName: (id) => id,
   reload: () => {},
+  isAdmin: false,
+  canWrite: () => false,
 });
 
 export const useDirectory = () => useContext(DirectoryContext);

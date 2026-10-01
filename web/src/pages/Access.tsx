@@ -45,15 +45,17 @@ export default function Access(_: PageProps) {
   return (
     <>
       <PageHeader title="Tenants & keys" description="Every API key belongs to one application, and every application to one tenant. Usage is attributed along that chain.">
-        <form onSubmit={addTenant} className="flex items-end gap-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor="new-tenant">New tenant</Label>
-            <Input id="new-tenant" className="w-56" value={name} onChange={(e) => setName(e.target.value)} placeholder="tenant name" />
-          </div>
-          <Button type="submit" disabled={!name.trim()}>
-            <Plus /> Add
-          </Button>
-        </form>
+        {dir.isAdmin && (
+          <form onSubmit={addTenant} className="flex items-end gap-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-tenant">New tenant</Label>
+              <Input id="new-tenant" className="w-56" value={name} onChange={(e) => setName(e.target.value)} placeholder="tenant name" />
+            </div>
+            <Button type="submit" disabled={!name.trim()}>
+              <Plus /> Add
+            </Button>
+          </form>
+        )}
       </PageHeader>
       <ErrorBox error={error} />
       {dir.tenants.length === 0 ? (
@@ -72,6 +74,7 @@ export default function Access(_: PageProps) {
 }
 
 function TenantCard({ tenant, apps }: { tenant: Tenant; apps: Application[] }) {
+  const writable = useDirectory().canWrite(tenant.id);
   return (
     <Card>
       <CardHeader className="items-center">
@@ -81,9 +84,9 @@ function TenantCard({ tenant, apps }: { tenant: Tenant; apps: Application[] }) {
         </span>
       </CardHeader>
       {apps.map((a) => (
-        <AppKeys key={a.id} app={a} />
+        <AppKeys key={a.id} app={a} writable={writable} />
       ))}
-      <AddApp tenantId={tenant.id} />
+      {writable && <AddApp tenantId={tenant.id} />}
     </Card>
   );
 }
@@ -123,7 +126,7 @@ function AddApp({ tenantId }: { tenantId: string }) {
   );
 }
 
-function AppKeys({ app }: { app: Application }) {
+function AppKeys({ app, writable }: { app: Application; writable: boolean }) {
   const keys = useAsync(() => api.keys(app.id), [app.id]);
   const [created, setCreated] = useState<ApiKey>();
   const [error, setError] = useState<string>();
@@ -172,9 +175,11 @@ function AppKeys({ app }: { app: Application }) {
           {app.can_assert_users ? <Badge variant="info">Names its users</Badge> : <Badge variant="muted">Untrusted client</Badge>}
           <span className="font-mono text-xs text-faint">{app.id}</span>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setCreating((c) => !c)}>
-          <KeyRound /> New key
-        </Button>
+        {writable && (
+          <Button variant="outline" size="sm" onClick={() => setCreating((c) => !c)}>
+            <KeyRound /> New key
+          </Button>
+        )}
       </div>
       {creating && (
         <form onSubmit={createKey} className="mx-5 mb-3 flex flex-wrap items-end gap-3 rounded-lg border bg-secondary p-3">
@@ -248,7 +253,7 @@ function AppKeys({ app }: { app: Application }) {
                   <KeyStatus k={k} />
                 </TableCell>
                 <TableCell className="text-right">
-                  {!k.revoked_at && !expired(k) && (
+                  {writable && !k.revoked_at && !expired(k) && (
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button variant="outline" size="sm" className="text-critical hover:bg-critical-bg">

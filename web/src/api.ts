@@ -59,6 +59,11 @@ export interface Principal {
   email?: string;
   name?: string;
   method: "oidc" | "token";
+  // Each grant is a role over every tenant (no tenants) or the named ones.
+  grants: { role: "admin" | "viewer"; tenants?: string[] }[];
+  role: "admin" | "tenant admin" | "viewer" | "tenant viewer";
+  is_admin: boolean;
+  reads_all: boolean;
 }
 
 export const auth = {

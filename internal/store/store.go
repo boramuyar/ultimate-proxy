@@ -123,6 +123,8 @@ type UsageQuery struct {
 	GroupBy     []string          // keys of UsageDimensions, or "tag:<key>"
 	Granularity string            // "", "hour" or "day"
 	Filters     map[string]string // dimension -> value
+	// TenantIn, when not nil, keeps only these tenants' usage.
+	TenantIn []string
 }
 
 // TagDimension returns the tag key of a "tag:<key>" dimension.
