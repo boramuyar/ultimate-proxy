@@ -123,3 +123,51 @@ jobs:
       - name: Logs
         if: failure()
         run: docker compose logs
+
+  shared-databases:
+    # The stores as a least-privilege user on servers shared with other data,
+    # as when reusing a company's own Postgres and ClickHouse: one schema the
+    # user owns in a database it cannot create in, and one ClickHouse
+    # database made for it, with no CREATE DATABASE grant. Postgres 13 and
+    # ClickHouse 24.8 are the oldest versions supported.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: company
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 30
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        env:
+          CLICKHOUSE_USER: admin
+          CLICKHOUSE_PASSWORD: admin
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports: ["8123:8123"]
+        options: >-
+          --health-cmd "wget -qO- http://127.0.0.1:8123/ping" --health-interval 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Create least-privilege users
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d company -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE public.billing (id int);
+          REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+          CREATE ROLE proxy LOGIN PASSWORD 'proxy';
+          CREATE SCHEMA proxy AUTHORIZATION proxy;
+          SQL
+          for q in "CREATE DATABASE proxy" "CREATE USER proxy IDENTIFIED BY 'proxy'" \
+            "GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP VIEW, TRUNCATE ON proxy.* TO proxy"; do
+            curl -fsS -u admin:admin http://localhost:8123/ --data-binary "$q"
+          done
+      - name: Test
+        run: go test -race -count=1 ./internal/store/
+        env:
+          TEST_DATABASE_URL: postgres://proxy:proxy@localhost:5432/company?search_path=proxy
+          TEST_CLICKHOUSE_URL: http://proxy:proxy@localhost:8123/proxy

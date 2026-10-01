@@ -4,6 +4,7 @@
 #   proxy          http://localhost:8080   (/<provider>/v1/... and /admin)
 #   postgres       internal only; tenants, keys, prices (pgdata volume)
 #   clickhouse     internal only; the request log (chdata volume)
+#                  To use your own Postgres or ClickHouse instead, see .env.example.
 #   valkey         internal only; rate limit counters shared by proxy replicas.
 #                  To use your own Redis or Dragonfly instead, see .env.example.
 #   fake-upstream  internal only; a free fake OpenAI API, the "fake" provider
@@ -57,8 +58,8 @@ services:
     restart: unless-stopped
     ports: ["${PROXY_PORT:-8080}:8080"]
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/proxy
-      CLICKHOUSE_URL: http://proxy:${CLICKHOUSE_PASSWORD:-clickhouse}@clickhouse:8123/proxy
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/proxy}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://proxy:${CLICKHOUSE_PASSWORD:-clickhouse}@clickhouse:8123/proxy}
       REDIS_URL: ${REDIS_URL:-redis://valkey:6379/0}
       # Unset means the dev default; set but empty turns the token off.
       PROXY_ADMIN_TOKEN: ${PROXY_ADMIN_TOKEN-dev-admin-token}
@@ -80,10 +81,12 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TRACING_ENDPOINT: ${TRACING_ENDPOINT:-}
       TRACING_AUTHORIZATION: ${TRACING_AUTHORIZATION:-}
-    # Lets REDIS_URL point at a server on this machine, as
-    # redis://host.docker.internal:6379/0.
+    # Lets REDIS_URL, DATABASE_URL and CLICKHOUSE_URL point at a server on
+    # this machine, as redis://host.docker.internal:6379/0.
     extra_hosts: ["host.docker.internal:host-gateway"]
-    volumes: ["./deploy/compose/config.yaml:/etc/ultimate-proxy/config.yaml:ro"]
+    volumes:
+      - ./deploy/compose/config.yaml:/etc/ultimate-proxy/config.yaml:ro
+      - ./deploy/compose/certs:/etc/ultimate-proxy/certs:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/ultimate-proxy", "-healthcheck", "http://127.0.0.1:8080/healthz"]
       interval: 2s
