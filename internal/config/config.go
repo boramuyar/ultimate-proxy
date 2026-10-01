@@ -165,14 +165,36 @@ type OIDC struct {
 	DisplayName string   `yaml:"display_name"`
 	Scopes      []string `yaml:"scopes"`
 
-	// Who may sign in: anyone matching any of these. At least one is required.
-	// Each entry may hold several values separated by commas, so a list can
-	// come from one environment variable.
+	// Who may sign in as a full admin: anyone matching any of these. Each
+	// entry may hold several values separated by commas, so a list can come
+	// from one environment variable.
 	AllowedEmails  []string `yaml:"allowed_emails"`
 	AllowedDomains []string `yaml:"allowed_domains"`
 	AllowedGroups  []string `yaml:"allowed_groups"`
+	// Roles let more people sign in with less access: read only, or limited
+	// to some tenants. Someone matching several entries gets all of them.
+	// Entries naming nobody are ignored.
+	Roles []RoleGrant `yaml:"roles"`
 	// GroupsClaim is the ID token claim holding the user's groups.
 	GroupsClaim string `yaml:"groups_claim"`
+}
+
+// Dashboard and admin API roles.
+const (
+	RoleAdmin  = "admin"  // may change things
+	RoleViewer = "viewer" // may only read
+)
+
+// RoleGrant gives a role to the people matching its emails, domains or
+// groups, for every tenant or only the named ones.
+type RoleGrant struct {
+	Role    string   `yaml:"role"`
+	Emails  []string `yaml:"emails"`
+	Domains []string `yaml:"domains"`
+	Groups  []string `yaml:"groups"`
+	// Tenants are tenant names. Empty means every tenant, and with it the
+	// settings no tenant owns: prices, new tenants and the audit log.
+	Tenants []string `yaml:"tenants"`
 }
 
 // Enabled reports whether OIDC sign-in is configured.
@@ -254,6 +276,17 @@ func (c *Config) applyDefaults() {
 	o.AllowedEmails = splitList(o.AllowedEmails, true)
 	o.AllowedDomains = splitList(o.AllowedDomains, true)
 	o.AllowedGroups = splitList(o.AllowedGroups, false)
+	roles := o.Roles[:0]
+	for _, g := range o.Roles {
+		g.Emails, g.Domains = splitList(g.Emails, true), splitList(g.Domains, true)
+		g.Groups, g.Tenants = splitList(g.Groups, false), splitList(g.Tenants, false)
+		// An entry naming nobody is dropped, so one filled from environment
+		// variables can be left empty.
+		if len(g.Emails)+len(g.Domains)+len(g.Groups) > 0 {
+			roles = append(roles, g)
+		}
+	}
+	o.Roles = roles
 	// Scopes are space-separated in OAuth; accept either.
 	o.Scopes = strings.Fields(strings.ReplaceAll(strings.Join(o.Scopes, " "), ",", " "))
 	if len(o.Scopes) == 0 {
@@ -335,8 +368,15 @@ func (c *Config) validate() error {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "/admin/auth/callback" {
 			return fmt.Errorf("admin.oidc: redirect_url must be <dashboard origin>/admin/auth/callback, got %q", o.RedirectURL)
 		}
-		if len(o.AllowedEmails)+len(o.AllowedDomains)+len(o.AllowedGroups) == 0 {
-			return fmt.Errorf("admin.oidc: set allowed_emails, allowed_domains or allowed_groups, or every account at the provider could sign in")
+		people := len(o.AllowedEmails) + len(o.AllowedDomains) + len(o.AllowedGroups)
+		for i, g := range o.Roles {
+			if g.Role != RoleAdmin && g.Role != RoleViewer {
+				return fmt.Errorf("admin.oidc.roles[%d]: role must be admin or viewer, got %q", i, g.Role)
+			}
+			people += len(g.Emails) + len(g.Domains) + len(g.Groups)
+		}
+		if people == 0 {
+			return fmt.Errorf("admin.oidc: set allowed_emails, allowed_domains, allowed_groups or roles, or every account at the provider could sign in")
 		}
 	}
 	issuers := map[string]bool{}

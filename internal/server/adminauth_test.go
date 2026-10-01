@@ -270,6 +270,8 @@ func TestOIDCConfigValidation(t *testing.T) {
 		"wrong path":        base + "    redirect_url: https://proxy.example/callback\n    allowed_domains: [example.com]\n",
 		"empty from env":    base + "    redirect_url: https://proxy.example/admin/auth/callback\n    allowed_emails: [\"\", \" , \"]\n",
 		"relative redirect": base + "    redirect_url: /admin/auth/callback\n    allowed_domains: [example.com]\n",
+		"unknown role":      base + "    redirect_url: https://proxy.example/admin/auth/callback\n    roles: [{role: owner, emails: [a@b.c]}]\n",
+		"only empty roles":  base + "    redirect_url: https://proxy.example/admin/auth/callback\n    roles: [{role: viewer, emails: [\"\"]}]\n",
 	} {
 		if _, err := config.Parse([]byte(tc)); err == nil {
 			t.Errorf("%s: no error", name)
@@ -281,6 +283,15 @@ func TestOIDCConfigValidation(t *testing.T) {
 	}
 	if got := strings.Join(cfg.Admin.OIDC.AllowedDomains, " "); got != "example.com corp.example" {
 		t.Fatalf("domains %q", got)
+	}
+	// Roles alone are enough, and entries naming nobody are dropped.
+	cfg, err = config.Parse([]byte(base + "    redirect_url: https://proxy.example/admin/auth/callback\n" +
+		"    roles: [{role: viewer, groups: [\"ops, sre\"], tenants: [acme]}, {role: admin, emails: [\"\"]}]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := cfg.Admin.OIDC.Roles; len(r) != 1 || strings.Join(r[0].Groups, " ") != "ops sre" || r[0].Tenants[0] != "acme" {
+		t.Fatalf("roles %+v", r)
 	}
 	// The old top-level admin_token still works.
 	cfg, _ = config.Parse([]byte("admin_token: old\n"))

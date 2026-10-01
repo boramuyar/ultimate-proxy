@@ -385,6 +385,10 @@ func (c *ClickHouse) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, 
 		params.Set("param_"+name, v)
 		filters = append(filters, fmt.Sprintf(" AND %s = {%s:String}", chDimension(k), name))
 	}
+	if q.TenantIn != nil {
+		params.Set("param_tenants", chStringArray(q.TenantIn))
+		filters = append(filters, " AND has({tenants:Array(String)}, tenant_id)")
+	}
 	filter := strings.Join(filters, "")
 	dims := "tenant_id, app_id, user_email, model, provider, cache_status, tags"
 	source := `SELECT toDateTime64(hour, 3, 'UTC') AS t, ` + dims + `, requests, failed_requests, input_tokens,
@@ -467,6 +471,15 @@ func chDimension(d string) string {
 		return "extractKeyValuePairs(tags, '=', ',')['" + k + "']"
 	}
 	return UsageDimensions[d]
+}
+
+// chStringArray writes a query parameter of type Array(String).
+func chStringArray(vs []string) string {
+	quoted := make([]string, len(vs))
+	for i, v := range vs {
+		quoted[i] = "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(v) + "'"
+	}
+	return "[" + strings.Join(quoted, ",") + "]"
 }
 
 func quoteIdent(s string) string { return "`" + strings.ReplaceAll(s, "`", "``") + "`" }

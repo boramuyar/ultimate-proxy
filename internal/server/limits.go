@@ -25,9 +25,14 @@ func (s *Server) listLimits(w http.ResponseWriter, r *http.Request) {
 		s.adminError(w, err)
 		return
 	}
+	readable, err := s.readableTenants(r)
+	if err != nil {
+		s.adminError(w, err)
+		return
+	}
 	tenant, app := r.URL.Query().Get("tenant_id"), r.URL.Query().Get("application_id")
 	ls = slices.DeleteFunc(ls, func(l store.Limit) bool {
-		return (tenant != "" && l.TenantID != tenant) || (app != "" && l.AppID != app)
+		return (tenant != "" && l.TenantID != tenant) || (app != "" && l.AppID != app) || (readable != nil && !readable[l.TenantID])
 	})
 	if ls == nil {
 		ls = []store.Limit{}
@@ -52,6 +57,14 @@ func (s *Server) createLimit(w http.ResponseWriter, r *http.Request) {
 		Enforcement string   `json:"enforcement"`
 	}
 	if !decodeBody(w, r, &body) {
+		return
+	}
+	if ok, err := s.mayTenant(r, body.TenantID, true); err != nil || !ok {
+		if err != nil {
+			s.adminError(w, err)
+		} else {
+			writeForbidden(w)
+		}
 		return
 	}
 	l := &store.Limit{
@@ -173,6 +186,14 @@ func (s *Server) limitsStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.adminError(w, err)
 		return
+	}
+	readable, err := s.readableTenants(r)
+	if err != nil {
+		s.adminError(w, err)
+		return
+	}
+	if readable != nil {
+		ls = slices.DeleteFunc(ls, func(l store.Limit) bool { return !readable[l.TenantID] })
 	}
 	type status struct {
 		store.Limit

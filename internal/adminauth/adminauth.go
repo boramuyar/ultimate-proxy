@@ -41,11 +41,68 @@ const (
 	MethodToken = "token"
 )
 
-// Principal is whoever made an admin request.
+// Principal is whoever made an admin request, and what they may do.
 type Principal struct {
-	Email  string `json:"email,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Method string `json:"method"`
+	Email  string  `json:"email,omitempty"`
+	Name   string  `json:"name,omitempty"`
+	Method string  `json:"method"`
+	Grants []Grant `json:"grants"`
+}
+
+// Grant is a role over every tenant (Tenants nil) or over the named ones.
+type Grant struct {
+	Role    string   `json:"role"`
+	Tenants []string `json:"tenants,omitempty"`
+}
+
+var fullAdmin = []Grant{{Role: config.RoleAdmin}}
+
+// IsAdmin reports whether p may change anything, tenants and prices included.
+func (p *Principal) IsAdmin() bool {
+	return slices.ContainsFunc(p.Grants, func(g Grant) bool { return g.Role == config.RoleAdmin && g.Tenants == nil })
+}
+
+// ReadsAll reports whether p may read every tenant, and the settings no
+// tenant owns such as the audit log.
+func (p *Principal) ReadsAll() bool {
+	return slices.ContainsFunc(p.Grants, func(g Grant) bool { return g.Tenants == nil })
+}
+
+// CanRead reports whether p may see the named tenant.
+func (p *Principal) CanRead(tenant string) bool {
+	return slices.ContainsFunc(p.Grants, func(g Grant) bool { return g.Tenants == nil || slices.Contains(g.Tenants, tenant) })
+}
+
+// CanWrite reports whether p may change the named tenant's applications,
+// keys and limits.
+func (p *Principal) CanWrite(tenant string) bool {
+	return slices.ContainsFunc(p.Grants, func(g Grant) bool {
+		return g.Role == config.RoleAdmin && (g.Tenants == nil || slices.Contains(g.Tenants, tenant))
+	})
+}
+
+// describe is a principal as the dashboard sees it, with its role summed up.
+func describe(p *Principal) any {
+	return struct {
+		*Principal
+		Role     string `json:"role"`
+		IsAdmin  bool   `json:"is_admin"`
+		ReadsAll bool   `json:"reads_all"`
+	}{p, p.Role(), p.IsAdmin(), p.ReadsAll()}
+}
+
+// Role sums the grants up for display: admin, viewer, or either one for
+// some tenants.
+func (p *Principal) Role() string {
+	switch {
+	case p.IsAdmin():
+		return "admin"
+	case slices.ContainsFunc(p.Grants, func(g Grant) bool { return g.Role == config.RoleAdmin }):
+		return "tenant admin"
+	case p.ReadsAll():
+		return "viewer"
+	}
+	return "tenant viewer"
 }
 
 type Auth struct {
@@ -91,7 +148,7 @@ func (a *Auth) Enabled() bool { return a.cfg.Token != "" || a.cfg.OIDC.Enabled()
 func (a *Auth) Authenticate(r *http.Request) *Principal {
 	if tok := identity.BearerToken(r); tok != "" {
 		if a.tokenOK(tok) {
-			return &Principal{Method: MethodToken}
+			return &Principal{Method: MethodToken, Grants: fullAdmin}
 		}
 		return nil
 	}
@@ -110,18 +167,21 @@ func (a *Auth) Authenticate(r *http.Request) *Principal {
 			return nil
 		}
 	case MethodOIDC:
-		// The allow lists are checked again, so removing someone from them
-		// ends their session.
-		if !a.cfg.OIDC.Enabled() || !a.allowed(s.Email, s.Groups) {
-			return nil
-		}
 	default:
 		return nil
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get(CSRFHeader) == "" {
 		return nil
 	}
-	return &Principal{Email: s.Email, Name: s.Name, Method: s.Method}
+	p := &Principal{Email: s.Email, Name: s.Name, Method: s.Method, Grants: fullAdmin}
+	if s.Method == MethodOIDC {
+		// Roles are worked out again on every request, so a change to the
+		// allow lists or roles applies to sessions already open.
+		if p.Grants = a.grants(s.Email, s.Groups); p.Grants == nil || !a.cfg.OIDC.Enabled() {
+			return nil
+		}
+	}
+	return p
 }
 
 func (a *Auth) tokenOK(tok string) bool {
@@ -131,24 +191,40 @@ func (a *Auth) tokenOK(tok string) bool {
 // tokenMAC ties token sessions to the current token without storing it.
 func (a *Auth) tokenMAC() string { return a.mac("token", []byte(a.cfg.Token))[:16] }
 
-// allowed applies the allow lists. A match on any list is enough.
-func (a *Auth) allowed(email string, groups []string) bool {
+// grants applies the allow lists and roles: nil when nothing matches. A
+// full admin needs no other grant.
+func (a *Auth) grants(email string, groups []string) []Grant {
 	o := a.cfg.OIDC
+	if matches(email, groups, o.AllowedEmails, o.AllowedDomains, o.AllowedGroups) {
+		return fullAdmin
+	}
+	var out []Grant
+	for _, r := range o.Roles {
+		if matches(email, groups, r.Emails, r.Domains, r.Groups) {
+			out = append(out, Grant{Role: r.Role, Tenants: r.Tenants})
+		}
+	}
+	return out
+}
+
+// matches reports whether someone is on any of the lists.
+func matches(email string, groups, emails, domains, groupList []string) bool {
 	email = strings.ToLower(email)
 	if email != "" {
-		if slices.Contains(o.AllowedEmails, email) {
+		if slices.Contains(emails, email) {
 			return true
 		}
-		if _, domain, ok := strings.Cut(email, "@"); ok && slices.Contains(o.AllowedDomains, domain) {
-			return true
-		}
-	}
-	for _, g := range groups {
-		if slices.Contains(o.AllowedGroups, g) {
+		if _, domain, ok := strings.Cut(email, "@"); ok && slices.Contains(domains, domain) {
 			return true
 		}
 	}
-	return false
+	return slices.ContainsFunc(groups, func(g string) bool { return slices.Contains(groupList, g) })
+}
+
+// knownGroup reports whether any allow list or role names the group.
+func (a *Auth) knownGroup(g string) bool {
+	o := a.cfg.OIDC
+	return slices.Contains(o.AllowedGroups, g) || slices.ContainsFunc(o.Roles, func(r config.RoleGrant) bool { return slices.Contains(r.Groups, g) })
 }
 
 // Handler serves /admin/auth/*.
@@ -178,7 +254,7 @@ func (a *Auth) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "not_signed_in", "Not signed in.")
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, describe(p))
 }
 
 // handleToken exchanges the break-glass token for a session cookie, so the
@@ -194,9 +270,9 @@ func (a *Auth) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.log.Info("admin sign-in", "method", MethodToken, "remote", r.RemoteAddr)
-	a.signedIn(Principal{Method: MethodToken}, true)
+	a.signedIn(Principal{Method: MethodToken, Grants: fullAdmin}, true)
 	a.setSession(w, r, session{Method: MethodToken, TokenMAC: a.tokenMAC()})
-	writeJSON(w, http.StatusOK, Principal{Method: MethodToken})
+	writeJSON(w, http.StatusOK, describe(&Principal{Method: MethodToken, Grants: fullAdmin}))
 }
 
 func (a *Auth) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -282,16 +358,16 @@ func (a *Auth) handleCallback(w http.ResponseWriter, r *http.Request) {
 	if v, ok := claims["email_verified"].(bool); ok && !v {
 		email = ""
 	}
-	if !a.allowed(email, groups) {
+	if a.grants(email, groups) == nil {
 		a.log.Warn("admin sign-in refused", "method", MethodOIDC, "email", email, "subject", idt.Subject)
 		a.signedIn(Principal{Method: MethodOIDC, Email: email, Name: name}, false)
 		redirectError(w, r, "not_allowed")
 		return
 	}
 	a.log.Info("admin sign-in", "method", MethodOIDC, "email", email, "subject", idt.Subject)
-	a.signedIn(Principal{Method: MethodOIDC, Email: email, Name: name}, true)
+	a.signedIn(Principal{Method: MethodOIDC, Email: email, Name: name, Grants: a.grants(email, groups)}, true)
 	// Keep only the groups that matter, so the cookie stays small.
-	groups = slices.DeleteFunc(groups, func(g string) bool { return !slices.Contains(a.cfg.OIDC.AllowedGroups, g) })
+	groups = slices.DeleteFunc(groups, func(g string) bool { return !a.knownGroup(g) })
 	a.setSession(w, r, session{Method: MethodOIDC, Email: email, Name: name, Groups: groups})
 	http.Redirect(w, r, st.Next, http.StatusFound)
 }

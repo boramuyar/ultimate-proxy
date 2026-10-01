@@ -25,6 +25,13 @@ admin:
     allowed_emails: ["${OIDC_ALLOWED_EMAILS}"]
     allowed_domains: ["${OIDC_ALLOWED_DOMAINS}"]
     allowed_groups: ["${OIDC_ALLOWED_GROUPS}"]
+    # Read-only access for more people. For admins of only some tenants,
+    # add entries with tenants: [...] (see "Roles" in the README).
+    roles:
+      - role: viewer
+        emails: ["${OIDC_VIEWER_EMAILS}"]
+        domains: ["${OIDC_VIEWER_DOMAINS}"]
+        groups: ["${OIDC_VIEWER_GROUPS}"]
     groups_claim: "${OIDC_GROUPS_CLAIM}"
 
 # Each provider is reached at /<name>/v1/..., for example

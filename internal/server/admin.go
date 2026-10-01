@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,6 +48,14 @@ func (s *Server) listTenants(w http.ResponseWriter, r *http.Request) {
 		s.adminError(w, err)
 		return
 	}
+	readable, err := s.readableTenants(r)
+	if err != nil {
+		s.adminError(w, err)
+		return
+	}
+	if readable != nil {
+		ts = slices.DeleteFunc(ts, func(t store.Tenant) bool { return !readable[t.ID] })
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": ts})
 }
 
@@ -74,6 +83,14 @@ func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.adminError(w, err)
 		return
+	}
+	readable, err := s.readableTenants(r)
+	if err != nil {
+		s.adminError(w, err)
+		return
+	}
+	if readable != nil {
+		apps = slices.DeleteFunc(apps, func(a store.Application) bool { return !readable[a.TenantID] })
 	}
 	if apps == nil {
 		apps = []store.Application{}
@@ -271,6 +288,22 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		openresponses.WriteError(w, openresponses.InvalidRequest("invalid_parameter", err.Error(), ""))
 		return
 	}
+	// Callers limited to some tenants only see theirs.
+	readable, err := s.readableTenants(r)
+	if err != nil {
+		s.adminError(w, err)
+		return
+	}
+	if readable != nil {
+		if t := q.Filters["tenant"]; t != "" && !readable[t] {
+			writeForbidden(w)
+			return
+		}
+		q.TenantIn = []string{}
+		for id := range readable {
+			q.TenantIn = append(q.TenantIn, id)
+		}
+	}
 	rows, err := s.store.QueryUsage(r.Context(), q)
 	if err != nil {
 		s.adminError(w, err)
@@ -344,6 +377,17 @@ func (s *Server) listInsights(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.adminError(w, err)
 		return
+	}
+	readable, err := s.readableTenants(r)
+	if err != nil {
+		s.adminError(w, err)
+		return
+	}
+	if readable != nil {
+		list = slices.DeleteFunc(list, func(in store.Insight) bool { return !readable[in.TenantID] })
+	}
+	if list == nil {
+		list = []store.Insight{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }

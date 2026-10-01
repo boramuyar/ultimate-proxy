@@ -43,6 +43,7 @@ function unit(l: Pick<Limit, "kind" | "period">): string {
 }
 
 export default function Limits(_: PageProps) {
+  const dir = useDirectory();
   const list = useAsync(() => api.limits(), []);
   // Current use changes by the second; refresh it while the page is open.
   useEffect(() => {
@@ -56,7 +57,7 @@ export default function Limits(_: PageProps) {
         title="Limits"
         description="Rate limits per sliding minute and budgets per day, week or month (UTC), for a tenant, an application, or its end users. Refused requests get 429 with Retry-After."
       />
-      <AddLimit onAdded={list.reload} />
+      {dir.tenants.some((t) => dir.canWrite(t.id)) && <AddLimit onAdded={list.reload} />}
       <ErrorBox error={list.error} />
       <Card>
         <CardHeader>
@@ -124,26 +125,28 @@ function LimitTable({ limits, onChange }: { limits: Limit[]; onChange: () => voi
                 {l.resets_at && <div className="mt-1 text-xs text-faint">Resets {fmtTime(l.resets_at)}</div>}
               </TableCell>
               <TableCell className="text-right">
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="text-critical hover:bg-critical-bg">
-                      Delete
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogBody>
-                      <AlertDialogTitle>Delete this limit?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        {appliesTo(l)} in {l.application_id ? dir.appName(l.application_id) : dir.tenantName(l.tenant_id)} will no longer be held to {amountOf(l.kind, l.amount)}{" "}
-                        {unit(l)}.
-                      </AlertDialogDescription>
-                    </AlertDialogBody>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => remove(l)}>Delete limit</AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                {dir.canWrite(l.tenant_id) && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline" size="sm" className="text-critical hover:bg-critical-bg">
+                        Delete
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogBody>
+                        <AlertDialogTitle>Delete this limit?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {appliesTo(l)} in {l.application_id ? dir.appName(l.application_id) : dir.tenantName(l.tenant_id)} will no longer be held to {amountOf(l.kind, l.amount)}{" "}
+                          {unit(l)}.
+                        </AlertDialogDescription>
+                      </AlertDialogBody>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => remove(l)}>Delete limit</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
               </TableCell>
             </TableRow>
           ))}
@@ -233,11 +236,13 @@ function AddLimit({ onAdded }: { onAdded: () => void }) {
                 <SelectValue placeholder="Choose a tenant" />
               </SelectTrigger>
               <SelectContent>
-                {dir.tenants.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.name}
-                  </SelectItem>
-                ))}
+                {dir.tenants
+                  .filter((t) => dir.canWrite(t.id))
+                  .map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </Field>

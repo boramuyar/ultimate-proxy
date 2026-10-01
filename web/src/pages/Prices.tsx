@@ -11,11 +11,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Empty, ErrorBox, PageHeader } from "@/components/page";
 import { fmtTime } from "@/format";
-import { useAsync } from "@/hooks";
+import { useAsync, useDirectory } from "@/hooks";
 
 type View = "current" | "history";
 
 export default function Prices(_: PageProps) {
+  const dir = useDirectory();
   const [view, setView] = useState<View>("current");
   const list = useAsync(() => api.prices(view === "current"), [view]);
 
@@ -30,7 +31,7 @@ export default function Prices(_: PageProps) {
           <ToggleGroupItem value="history">History</ToggleGroupItem>
         </ToggleGroup>
       </PageHeader>
-      <AddPrice onAdded={list.reload} />
+      {dir.isAdmin && <AddPrice onAdded={list.reload} />}
       <ErrorBox error={list.error} />
       <Card>
         <CardHeader>

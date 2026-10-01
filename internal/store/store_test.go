@@ -127,6 +127,23 @@ func TestStores(t *testing.T) {
 				t.Fatalf("tag filter: %+v", rows)
 			}
 
+			for _, tc := range []struct {
+				in   []string
+				want int64
+			}{{[]string{ten.ID, "ten_other"}, 3}, {[]string{"ten_other"}, 0}, {[]string{}, 0}} {
+				rows, err = st.QueryUsage(ctx, UsageQuery{From: base.Add(-time.Hour), To: base.Add(3 * time.Hour), TenantIn: tc.in})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var n int64
+				for _, r := range rows {
+					n += r.Requests
+				}
+				if n != tc.want {
+					t.Fatalf("TenantIn %v: %d requests, want %d", tc.in, n, tc.want)
+				}
+			}
+
 			in := &Insight{ID: openresponses.NewID("ins"), Kind: "error_rate", Severity: "warning", Status: "open", TenantID: ten.ID, AppID: app.ID,
 				Model: "m1", Title: "t", Detail: "d", Evidence: map[string]any{"rate": 0.5}, FirstSeen: base, LastSeen: base}
 			if err := st.SaveInsight(ctx, in); err != nil {

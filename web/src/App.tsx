@@ -207,12 +207,15 @@ function Dashboard({ me, onSignOut }: { me: Principal; onSignOut: () => void }) 
         tenants.reload();
         apps.reload();
       },
+      isAdmin: me.is_admin,
+      canWrite: (id) => me.is_admin || me.grants.some((g) => g.role === "admin" && !!g.tenants?.includes(t.get(id) ?? "")),
     };
-  }, [tenants.data, apps.data, tenants.reload, apps.reload]);
+  }, [tenants.data, apps.data, tenants.reload, apps.reload, me]);
 
-  const { Component } = PAGES[page];
+  // The audit log covers every tenant, so only those who read them all see it.
+  const keys = (Object.keys(PAGES) as PageKey[]).filter((k) => k !== "audit" || me.reads_all);
+  const { Component } = PAGES[keys.includes(page) ? page : "overview"];
   const openCount = openInsights.data?.length ?? 0;
-  const keys = Object.keys(PAGES) as PageKey[];
 
   return (
     <DirectoryContext.Provider value={directory}>
@@ -230,8 +233,9 @@ function Dashboard({ me, onSignOut }: { me: Principal; onSignOut: () => void }) 
                 <span className={cn("size-2 rounded-full", health.data ? "bg-[#0cce6b]" : health.loading ? "bg-faint" : "bg-critical")} />
                 {health.data ? "Healthy" : health.loading ? "Checking" : "Unreachable"}
               </span>
-              <span className="hidden max-w-[220px] truncate text-[13px] text-muted-foreground md:inline" title={me.email}>
+              <span className="hidden max-w-[260px] truncate text-[13px] text-muted-foreground md:inline" title={me.email}>
                 {me.method === "token" ? "Admin token" : (me.email ?? me.name)}
+                {me.role !== "admin" && <span className="ml-2 rounded-full border px-2 text-xs leading-5">{me.role}</span>}
               </span>
               <Button variant="outline" size="sm" onClick={onSignOut}>
                 <LogOut /> Sign out
