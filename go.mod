@@ -1,4 +1,4 @@
-module github.com/boramuyar/ultimate-proxy
+module github.com/omni-proxy/omni-proxy
 
 go 1.25.0
 

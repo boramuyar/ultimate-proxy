@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
-const KeyPrefix = "up_"
+const KeyPrefix = "op_"
 
 // NewKey returns a new API key and its hash. Only the hash is stored.
 func NewKey() (key, hash string) {
@@ -60,7 +60,7 @@ func NewAPIKeys(s store.Store) *APIKeys {
 	return &APIKeys{store: s, positiveTTL: 30 * time.Second, negativeTTL: 5 * time.Second}
 }
 
-// Accepts takes any token: keys given in the config need not carry the up_
+// Accepts takes any token: keys given in the config need not carry the op_
 // prefix, so API keys go last in a chain.
 func (a *APIKeys) Accepts(string) bool { return true }
 

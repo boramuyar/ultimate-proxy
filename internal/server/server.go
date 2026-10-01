@@ -11,17 +11,17 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/boramuyar/ultimate-proxy/internal/adminauth"
-	"github.com/boramuyar/ultimate-proxy/internal/config"
-	"github.com/boramuyar/ultimate-proxy/internal/identity"
-	"github.com/boramuyar/ultimate-proxy/internal/insights"
-	"github.com/boramuyar/ultimate-proxy/internal/limits"
-	"github.com/boramuyar/ultimate-proxy/internal/meter"
-	"github.com/boramuyar/ultimate-proxy/internal/metrics"
-	"github.com/boramuyar/ultimate-proxy/internal/pricing"
-	"github.com/boramuyar/ultimate-proxy/internal/provider"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
-	"github.com/boramuyar/ultimate-proxy/internal/tracing"
+	"github.com/omni-proxy/omni-proxy/internal/adminauth"
+	"github.com/omni-proxy/omni-proxy/internal/config"
+	"github.com/omni-proxy/omni-proxy/internal/identity"
+	"github.com/omni-proxy/omni-proxy/internal/insights"
+	"github.com/omni-proxy/omni-proxy/internal/limits"
+	"github.com/omni-proxy/omni-proxy/internal/meter"
+	"github.com/omni-proxy/omni-proxy/internal/metrics"
+	"github.com/omni-proxy/omni-proxy/internal/pricing"
+	"github.com/omni-proxy/omni-proxy/internal/provider"
+	"github.com/omni-proxy/omni-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/tracing"
 )
 
 type Server struct {
@@ -56,7 +56,7 @@ func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (
 		s.providers[p.Name] = provider.NewOpenAI(p.Name, p.BaseURL, p.APIKey, p.Headers, client)
 	}
 	// JWTs go first: API keys accept any token, since keys in the config
-	// need not carry the up_ prefix.
+	// need not carry the op_ prefix.
 	if len(cfg.Auth.JWT) > 0 {
 		s.auth = append(s.auth, identity.NewJWTs(cfg.Auth.JWT, st))
 	}

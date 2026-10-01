@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 // stub accepts tokens with a given prefix.

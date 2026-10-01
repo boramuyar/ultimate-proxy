@@ -25,7 +25,7 @@ func TestMintedTokenFromAPIKey(t *testing.T) {
 		t.Fatalf("mint: %d %v", status, body)
 	}
 	token := body["token"].(string)
-	if !strings.HasPrefix(token, "upt_") || body["user"] != "alice@acme.com" {
+	if !strings.HasPrefix(token, "opt_") || body["user"] != "alice@acme.com" {
 		t.Fatalf("unexpected mint response %v", body)
 	}
 	exp, _ := time.Parse(time.RFC3339, body["expires_at"].(string))
@@ -71,7 +71,7 @@ func TestMintRules(t *testing.T) {
 		{"untrusted app, no user", untrustedKey, `{}`, 201},
 		{"too short", trustedKey, `{"expires_in":10}`, 400},
 		{"too long", trustedKey, `{"expires_in":90000}`, 400},
-		{"bad key", "up_nope", `{}`, 401},
+		{"bad key", "op_nope", `{}`, 401},
 	}
 	for _, c := range cases {
 		if status, body := h.mint(c.key, c.body); status != c.status {
@@ -84,7 +84,7 @@ func TestMintedTokenFromJWT(t *testing.T) {
 	h, idp := newJWTHarness(t, jwtAuth)
 	exp := time.Now().Add(5 * time.Minute).Truncate(time.Second)
 	jwt := idp.AccessToken(map[string]any{
-		"sub": "u-1", "aud": "ultimate-proxy", "org": "initech", "email": "peter@initech.com",
+		"sub": "u-1", "aud": "omni-proxy", "org": "initech", "email": "peter@initech.com",
 		"llm_models": []any{"gpt"}, "exp": exp.Unix(),
 	})
 	if status, _ := h.mint(jwt, `{"user":"someone@else.com"}`); status != http.StatusForbidden {

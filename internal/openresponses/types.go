@@ -302,17 +302,3 @@ type FunctionCallItem struct {
 	Arguments string `json:"arguments"`
 	Status    string `json:"status"`
 }
-
-type ReasoningItem struct {
-	Type             string          `json:"type"`
-	ID               string          `json:"id"`
-	Content          []ReasoningText `json:"content,omitempty"`
-	Summary          []ReasoningText `json:"summary"`
-	EncryptedContent *string         `json:"encrypted_content,omitempty"`
-}
-
-// ReasoningText is used for both reasoning_text and summary_text parts.
-type ReasoningText struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}

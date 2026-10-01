@@ -46,7 +46,7 @@ admin:
 #   api_keys: true
 #   jwt:
 #     - issuer: https://keycloak.example.com/realms/acme
-#       audience: ultimate-proxy
+#       audience: omni-proxy
 #       tenant: acme              # or claims.tenant
 #       claims: {app: azp, user: email, groups: groups, models: llm_models}
 #       group_models:

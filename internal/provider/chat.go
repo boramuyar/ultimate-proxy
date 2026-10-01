@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/sse"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/sse"
 )
 
 // ChatResult is what the proxy accounts for from a relayed Chat Completions

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/boramuyar/ultimate-proxy/internal/fakeupstream"
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/fakeupstream"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
 )
 
 func BenchmarkParseEnvelope(b *testing.B) {

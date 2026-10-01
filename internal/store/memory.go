@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
 )
 
 // Memory is an in-process store for development and tests. Nothing survives a

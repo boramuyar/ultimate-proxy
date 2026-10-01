@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/provider"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/provider"
 )
 
 // handleChat serves POST /<provider>/v1/chat/completions. The request and

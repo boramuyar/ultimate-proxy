@@ -1,10 +1,11 @@
-// Command ultimate-proxy runs the Open Responses gateway.
+// Command omni-proxy runs the Open Responses gateway.
 package main
 
 import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,16 +13,24 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/config"
-	"github.com/boramuyar/ultimate-proxy/internal/meter"
-	"github.com/boramuyar/ultimate-proxy/internal/server"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/config"
+	"github.com/omni-proxy/omni-proxy/internal/meter"
+	"github.com/omni-proxy/omni-proxy/internal/server"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
+
+// version is set at build time with -ldflags "-X main.version=v0.1.0".
+var version = "dev"
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to the config file")
 	healthcheck := flag.String("healthcheck", "", "GET this URL and exit 0 if it answers 200 (for container health checks)")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 	if *healthcheck != "" {
 		resp, err := (&http.Client{Timeout: 3 * time.Second}).Get(*healthcheck)
 		if err != nil || resp.StatusCode != http.StatusOK {
@@ -30,6 +39,7 @@ func main() {
 		os.Exit(0)
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	log.Info("starting omni-proxy", "version", version)
 	if err := run(*configPath, log); err != nil {
 		log.Error("fatal", "err", err)
 		os.Exit(1)

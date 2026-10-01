@@ -14,9 +14,9 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
-	"github.com/boramuyar/ultimate-proxy/internal/config"
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/config"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 // Asymmetric algorithms only: with a shared-secret algorithm, anyone who can

@@ -210,7 +210,7 @@ func value(v attribute.Value) anyValue {
 		}
 		return anyValue{Array: &arr}
 	default:
-		str := v.Emit()
+		str := v.String()
 		return anyValue{String: &str}
 	}
 }

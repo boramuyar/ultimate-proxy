@@ -126,8 +126,8 @@ func TestTracing(t *testing.T) {
 	a := spanAttrs(s)
 	for k, want := range map[string]string{
 		"gen_ai.provider.name": "openai", "gen_ai.request.model": "gpt",
-		"ultimate_proxy.tenant": "acme", "ultimate_proxy.application": "chat",
-		"ultimate_proxy.status": "completed", "ultimate_proxy.tag.feature": "search",
+		"omni_proxy.tenant": "acme", "omni_proxy.application": "chat",
+		"omni_proxy.status": "completed", "omni_proxy.tag.feature": "search",
 	} {
 		if a[k] != want {
 			t.Errorf("%s = %q, want %q (all: %v)", k, a[k], want, a)

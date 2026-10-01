@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/boramuyar/ultimate-proxy/internal/fakeupstream"
+	"github.com/omni-proxy/omni-proxy/internal/fakeupstream"
 )
 
 // BenchmarkOverhead compares a request sent straight to the fake upstream

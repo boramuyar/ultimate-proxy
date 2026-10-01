@@ -1,4 +1,4 @@
-/ultimate-proxy
+/omni-proxy
 /fake-upstream
 *.test
 .spec/

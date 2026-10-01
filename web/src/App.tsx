@@ -136,7 +136,7 @@ function Login({ config, initialError, onSignedIn }: { config?: AuthConfig; init
         <div className="mb-8 flex flex-col items-center gap-4 text-center">
           <Logo className="size-9" />
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Sign in to ultimate-proxy</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Sign in to omni-proxy</h1>
             {config && !oidc && config.token && (
               <p className="mt-1.5 text-muted-foreground">
                 Use the proxy's admin token, <code className="font-mono text-[13px] text-foreground">PROXY_ADMIN_TOKEN</code>.
@@ -226,7 +226,7 @@ function Dashboard({ me, onSignOut }: { me: Principal; onSignOut: () => void }) 
               <Logo />
             </a>
             <Slash />
-            <span className="font-medium">ultimate-proxy</span>
+            <span className="font-medium">omni-proxy</span>
             <span className="hidden rounded-full border px-2 text-xs leading-5 text-muted-foreground sm:inline">admin</span>
             <div className="ml-auto flex items-center gap-4">
               <span className="hidden items-center gap-2 text-[13px] text-muted-foreground sm:flex" title="GET /healthz">

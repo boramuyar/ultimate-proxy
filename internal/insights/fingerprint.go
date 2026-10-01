@@ -9,7 +9,7 @@ import (
 	"hash/maphash"
 	"sort"
 
-	"github.com/boramuyar/ultimate-proxy/internal/openresponses"
+	"github.com/omni-proxy/omni-proxy/internal/openresponses"
 )
 
 // maxSegments caps how many input items are fingerprinted per request.

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/boramuyar/ultimate-proxy/internal/config"
-	"github.com/boramuyar/ultimate-proxy/internal/store"
+	"github.com/omni-proxy/omni-proxy/internal/config"
+	"github.com/omni-proxy/omni-proxy/internal/store"
 )
 
 var pad = strings.Repeat("stable system prompt text ", 40)
