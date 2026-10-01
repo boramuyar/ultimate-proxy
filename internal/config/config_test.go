@@ -44,3 +44,18 @@ func TestProviderValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestTracingValidation(t *testing.T) {
+	cfg, err := Parse([]byte("tracing: {endpoint: http://otel:4318}"))
+	if err != nil || cfg.Tracing.ServiceName != "ultimate-proxy" || *cfg.Tracing.SampleRatio != 1 {
+		t.Fatalf("defaults: %+v %v", cfg, err)
+	}
+	for yaml, want := range map[string]string{
+		"tracing: {endpoint: otel:4318}": "tracing.endpoint",
+		"tracing: {sample_ratio: 2}":     "sample_ratio",
+	} {
+		if _, err := Parse([]byte(yaml)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v, want an error containing %q", yaml, err, want)
+		}
+	}
+}

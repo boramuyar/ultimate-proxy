@@ -73,6 +73,17 @@ func run(configPath string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if cfg.Tracing.Endpoint != "" {
+		log.Info("sending traces", "endpoint", cfg.Tracing.Endpoint, "sample_ratio", *cfg.Tracing.SampleRatio)
+	}
+	defer func() {
+		// Send the spans still queued once the last requests are done.
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Tracer().Shutdown(sctx); err != nil {
+			log.Warn("sending the last traces failed", "err", err)
+		}
+	}()
 	if err := srv.Bootstrap(ctx); err != nil {
 		return err
 	}
