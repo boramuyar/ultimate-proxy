@@ -35,8 +35,8 @@ or fall back to other models: an upstream error reaches the caller as the upstre
   ClickHouse in batches, off the request path. Tenants, keys, prices and insights stay in Postgres.
 - `GET /admin/usage` to answer "who used how many tokens", grouped by tenant, application, email, model,
   provider or your own request tags (`X-Proxy-Tags`), optionally bucketed by hour or day.
-- Prompt-cache diagnosis on every Responses request: whether the cache hit, and if not, why (see
-  below). Chat Completions requests record cached tokens but are not diagnosed yet.
+- Prompt-cache diagnosis on every Responses request: whether the cache hit, if not why, and what the
+  miss cost (see below). Chat Completions requests record cached tokens but are not diagnosed yet.
 - Insights: problems the proxy notices in live traffic, per application and model, listed at
   `GET /admin/insights` and posted to a webhook or Slack when they open and resolve.
 - Cost in USD from a versioned prices table, on every usage event and in `/admin/usage`.
@@ -418,13 +418,25 @@ hashes are kept) and compares it with what the same application sent recently. E
 | `miss_too_short` | The prompt is below the provider's minimum cacheable size. |
 | `unknown` | The request uses `previous_response_id`, so the proxy can't see the prompt. |
 
+### Money lost to cache misses
+
+A miss that could have hit is priced: the tokens that should have come from cache, times the
+difference between the model's input and cached-input prices. For `miss_unexpected` those are the
+tokens of the prefix sent recently. For the misses the application causes (`miss_instructions_*`,
+`miss_tools_*`, `miss_history_rewritten`), the proxy estimates them as the length of the application's
+previous prompt, when that was sent within `cache_ttl`. Each usage event carries `missed_cost_usd`,
+`/admin/usage` sums it, and the dashboard shows it on the Prompt cache page (in total, split between
+"app changes its prompt" and "provider missed", and per application) and on the Overview. The two
+cache insights quote it too. It is an estimate: it needs a price for the model, and providers decide
+for themselves what they cache.
+
 `/admin/usage?group_by=application,cache` shows the mix per application. Every minute, rules look at
 the last `window` of traffic per application and model and open an insight when a rate crosses its
 threshold, then resolve it when the rate falls below half of it:
 
 | Insight | Fires when |
 | --- | --- |
-| `cache_prefix_unstable` | Too many requests miss because the application keeps changing its prompt prefix. The insight says which change dominates and how to fix it. |
+| `cache_prefix_unstable` | Too many requests miss because the application keeps changing its prompt prefix. The insight says which change dominates, how to fix it, and what it cost. |
 | `cache_unexpected_miss` | Too many repeated prefixes miss anyway, with the tokens and dollars that cost. |
 | `error_rate` | Too many requests fail, with the most common error codes. |
 | `truncation` | Too many responses end incomplete at `max_output_tokens`. |

@@ -57,7 +57,11 @@ export default function Overview({ range, setRange }: PageProps) {
       <StatGrid>
         <Stat label="Requests" value={fmtNumber(t?.requests ?? 0)} hint={`${fmtPct(failRate)} failed`} />
         <Stat label="Tokens" value={fmtNumber(t?.total_tokens ?? 0)} hint={t ? `${fmtNumber(t.input_tokens)} in / ${fmtNumber(t.output_tokens)} out` : "—"} />
-        <Stat label="Est. cost" value={fmtUSD(t?.cost_usd ?? 0)} hint="from the prices table" />
+        <Stat
+          label="Est. cost"
+          value={fmtUSD(t?.cost_usd ?? 0)}
+          hint={t?.missed_cost_usd ? <a href="#/cache" className="hover:text-foreground">{fmtUSD(t.missed_cost_usd)} lost to cache misses</a> : "from the prices table"}
+        />
         <Stat
           label="Cache hit rate"
           value={fmtPct(hitRate(t?.cached_input_tokens ?? 0, t?.input_tokens ?? 0))}

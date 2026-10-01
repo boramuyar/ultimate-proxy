@@ -209,7 +209,7 @@ var usageColumns = []string{
 	"ts", "request_id", "tenant_id", "app_id", "key_id", "user_email", "user_source", "model", "provider",
 	"upstream_model", "stream", "status", "error_code", "http_status", "input_tokens", "cached_input_tokens",
 	"cache_write_tokens", "output_tokens", "reasoning_tokens", "usage_reported", "latency_ms", "ttft_ms",
-	"prompt_cache_key", "cost_usd", "cache_status", "expected_cached_tokens", "auth_method", "subject", "tags",
+	"prompt_cache_key", "cost_usd", "cache_status", "expected_cached_tokens", "auth_method", "subject", "tags", "missed_cost_usd",
 }
 
 func (p *Postgres) InsertUsage(ctx context.Context, events []UsageEvent) error {
@@ -220,7 +220,7 @@ func (p *Postgres) InsertUsage(ctx context.Context, events []UsageEvent) error {
 				e.TS, e.RequestID, e.TenantID, e.AppID, e.KeyID, e.UserEmail, e.UserSource, e.Model, e.Provider,
 				e.UpstreamModel, e.Stream, e.Status, e.ErrorCode, e.HTTPStatus, e.InputTokens, e.CachedInputTokens,
 				e.CacheWriteTokens, e.OutputTokens, e.ReasoningTokens, e.UsageReported, e.LatencyMS, e.TTFTMS,
-				e.PromptCacheKey, e.CostUSD, e.CacheStatus, e.ExpectedCachedTokens, e.AuthMethod, e.Subject, pgTags(e.Tags),
+				e.PromptCacheKey, e.CostUSD, e.CacheStatus, e.ExpectedCachedTokens, e.AuthMethod, e.Subject, pgTags(e.Tags), e.MissedCostUSD,
 			}, nil
 		}))
 	return err
@@ -252,7 +252,7 @@ func (p *Postgres) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, er
 		"count(*)", "count(*) FILTER (WHERE status = 'failed')",
 		"coalesce(sum(input_tokens), 0)", "coalesce(sum(cached_input_tokens), 0)",
 		"coalesce(sum(cache_write_tokens), 0)", "coalesce(sum(output_tokens), 0)",
-		"coalesce(sum(reasoning_tokens), 0)", "coalesce(sum(cost_usd), 0)")
+		"coalesce(sum(reasoning_tokens), 0)", "coalesce(sum(cost_usd), 0)", "coalesce(sum(missed_cost_usd), 0)")
 	sql := "SELECT " + strings.Join(sel, ", ") + " FROM usage_events WHERE " + strings.Join(where, " AND ")
 	if len(group) > 0 {
 		sql += " GROUP BY " + strings.Join(group, ", ")
@@ -279,7 +279,7 @@ func (p *Postgres) QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, er
 			dest = append(dest, &dims[i])
 		}
 		dest = append(dest, &r.Requests, &r.FailedRequests, &r.InputTokens, &r.CachedInputTokens,
-			&r.CacheWriteTokens, &r.OutputTokens, &r.ReasoningTokens, &r.CostUSD)
+			&r.CacheWriteTokens, &r.OutputTokens, &r.ReasoningTokens, &r.CostUSD, &r.MissedCostUSD)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}

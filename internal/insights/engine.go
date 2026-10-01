@@ -52,6 +52,7 @@ type bucket struct {
 	unstable     [5]int // by unstableStatuses index
 	missedTokens int
 	missedCost   float64
+	unstableCost float64 // what unstable-prefix misses cost over hits
 	errorCodes   map[string]int
 }
 
@@ -162,6 +163,7 @@ func (e *Engine) Record(o Observation) {
 		for i, s := range unstableStatuses {
 			if s == o.CacheStatus {
 				b.unstable[i]++
+				b.unstableCost += o.MissedCostUSD
 			}
 		}
 	}
@@ -206,6 +208,7 @@ func (w *window) sum(now time.Time, span time.Duration) totals {
 		t.unexpected += b.unexpected
 		t.missedTokens += b.missedTokens
 		t.missedCost += b.missedCost
+		t.unstableCost += b.unstableCost
 		for j, n := range b.unstable {
 			t.unstable[j] += n
 			t.unstableTotal += n
@@ -347,9 +350,12 @@ func (e *Engine) rules(sc scope, w *window, t *totals) []finding {
 		}
 		f.title = fmt.Sprintf("%s: %.0f%% of %s requests miss the prompt cache because the prompt prefix keeps changing", name, 100*f.rate, sc.model)
 		f.detail = unstableAdvice[unstableStatuses[top]]
+		if t.unstableCost >= 0.01 {
+			f.detail += fmt.Sprintf(" These misses cost about $%.2f more than cache hits over the last %s.", t.unstableCost, win)
+		}
 		f.evidence = map[string]any{
 			"window": win, "requests": t.eligible, "unstable": t.unstableTotal, "rate": round(f.rate),
-			"reasons": reasons, "top_reason": unstableStatuses[top],
+			"reasons": reasons, "top_reason": unstableStatuses[top], "missed_savings_usd": round(t.unstableCost),
 		}
 		out = append(out, f)
 	}
@@ -365,6 +371,9 @@ func (e *Engine) rules(sc scope, w *window, t *totals) []finding {
 		f.detail = fmt.Sprintf("These requests repeat a prefix sent within the last %s, yet the provider served none of it from cache. "+
 			"Set prompt_cache_key to a value shared by requests with the same prefix so they are routed to the same cache, "+
 			"and check that the traffic is not spread across accounts, regions or deployments.", fmtDuration(e.cfg.CacheTTL))
+		if t.missedCost >= 0.01 {
+			f.detail += fmt.Sprintf(" These misses cost about $%.2f more than cache hits over the last %s.", t.missedCost, win)
+		}
 		f.evidence = map[string]any{
 			"window": win, "requests": denom, "unexpected_misses": t.unexpected, "rate": round(f.rate),
 			"missed_cached_tokens": t.missedTokens, "missed_savings_usd": round(t.missedCost),

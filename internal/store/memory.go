@@ -283,6 +283,7 @@ func (m *Memory) QueryUsage(_ context.Context, q UsageQuery) ([]UsageRow, error)
 		r.ReasoningTokens += int64(e.ReasoningTokens)
 		r.TotalTokens += int64(e.InputTokens + e.OutputTokens)
 		r.CostUSD += e.CostUSD
+		r.MissedCostUSD += e.MissedCostUSD
 	}
 	out := make([]UsageRow, 0, len(order))
 	for _, k := range order {

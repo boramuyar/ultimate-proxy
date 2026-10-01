@@ -176,3 +176,31 @@ func TestBudgetInsight(t *testing.T) {
 		t.Fatal("still open after the period ended")
 	}
 }
+
+// TestLostTokens checks the estimate of what a diverging prompt cost: the
+// previous prompt's length, only while the provider could still hold it.
+func TestLostTokens(t *testing.T) {
+	first := Compute([]byte(`{"instructions":"Today is 2026-09-29. ` + pad + `","input":"hi ` + pad + `"}`))
+	second := Compute([]byte(`{"instructions":"Today is 2026-09-30. ` + pad + `","input":"hi ` + pad + `"}`))
+	now := time.Now()
+	for _, c := range []struct {
+		name  string
+		gap   time.Duration
+		input int
+		want  int
+	}{
+		{"within the TTL", time.Minute, 0, first.TotalTokens},
+		{"capped by the upstream's count", time.Minute, 400, 400},
+		{"after the TTL", 10 * time.Minute, 0, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tr := NewTracker(5*time.Minute, 300)
+			tr.After("s", first, now)
+			exp := tr.Before("s", second, now.Add(c.gap))
+			st, lost := tr.Classify(second, exp, c.input, 0)
+			if st != CacheInstructionsDyn || lost != c.want {
+				t.Fatalf("got %s, %d lost tokens; want %d", st, lost, c.want)
+			}
+		})
+	}
+}
