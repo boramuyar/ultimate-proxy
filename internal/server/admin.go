@@ -15,11 +15,12 @@ import (
 // requireAdmin accepts a dashboard session or the break-glass bearer token.
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.adminAuth.Authenticate(r) == nil {
+		p := s.adminAuth.Authenticate(r)
+		if p == nil {
 			openresponses.WriteError(w, openresponses.NewError(http.StatusUnauthorized, openresponses.ErrInvalidRequest, "invalid_admin_token", "Missing or invalid admin credentials.", ""))
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(withAdminPrincipal(r.Context(), p)))
 	})
 }
 

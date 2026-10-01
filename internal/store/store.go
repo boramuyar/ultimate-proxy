@@ -3,6 +3,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -246,6 +247,25 @@ func (l *Limit) Scope() string {
 	return "tenant"
 }
 
+// AuditEntry records one change made through the admin API, or a sign-in to
+// it: who, what, on which object, and with what result.
+type AuditEntry struct {
+	ID          string    `json:"id"`
+	TS          time.Time `json:"ts"`
+	ActorMethod string    `json:"actor_method"` // oidc or token
+	ActorEmail  string    `json:"actor_email,omitempty"`
+	ActorName   string    `json:"actor_name,omitempty"`
+	ActorRole   string    `json:"actor_role,omitempty"`
+	// Action names what was done, such as key.create or sign_in.
+	Action   string `json:"action"`
+	Method   string `json:"method"`
+	Path     string `json:"path"`
+	TargetID string `json:"target_id,omitempty"`
+	Status   int    `json:"status"`
+	// Request is the JSON body that was sent, if any.
+	Request json.RawMessage `json:"request,omitempty"`
+}
+
 type Store interface {
 	EnsureTenant(ctx context.Context, name string) (*Tenant, error)
 	ListTenants(ctx context.Context) ([]Tenant, error)
@@ -285,5 +305,9 @@ type Store interface {
 	SaveInsight(ctx context.Context, in *Insight) error
 	// ListInsights returns insights with the given status ("" for all), newest first.
 	ListInsights(ctx context.Context, status string) ([]Insight, error)
+	AddAudit(ctx context.Context, e *AuditEntry) error
+	// ListAudit returns up to limit entries older than before (zero: from
+	// the newest), newest first.
+	ListAudit(ctx context.Context, before time.Time, limit int) ([]AuditEntry, error)
 	Close()
 }

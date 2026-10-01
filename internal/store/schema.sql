@@ -122,3 +122,20 @@ CREATE TABLE IF NOT EXISTS limits (
     enforcement text NOT NULL DEFAULT 'hard',
     created_at  timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id           text PRIMARY KEY,
+    ts           timestamptz NOT NULL,
+    actor_method text NOT NULL,
+    actor_email  text NOT NULL,
+    actor_name   text NOT NULL,
+    actor_role   text NOT NULL,
+    action       text NOT NULL,
+    method       text NOT NULL,
+    path         text NOT NULL,
+    target_id    text NOT NULL,
+    status       integer NOT NULL,
+    request      jsonb
+);
+
+CREATE INDEX IF NOT EXISTS audit_log_ts ON audit_log (ts DESC);

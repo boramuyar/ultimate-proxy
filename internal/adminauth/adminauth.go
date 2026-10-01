@@ -58,6 +58,16 @@ type Auth struct {
 
 	mu       sync.Mutex
 	provider *oidc.Provider
+
+	// OnSignIn, when set, is told about every sign-in, and about people the
+	// identity provider vouched for but the allow lists refused.
+	OnSignIn func(p Principal, allowed bool)
+}
+
+func (a *Auth) signedIn(p Principal, allowed bool) {
+	if a.OnSignIn != nil {
+		a.OnSignIn(p, allowed)
+	}
 }
 
 func New(cfg config.Admin, log *slog.Logger) *Auth {
@@ -178,10 +188,13 @@ func (a *Auth) handleToken(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil || !a.tokenOK(strings.TrimSpace(body.Token)) {
+		// Not recorded: anyone can send a wrong token, as often as they like.
+		a.log.Warn("admin sign-in refused", "method", MethodToken, "remote", r.RemoteAddr)
 		writeError(w, http.StatusUnauthorized, "invalid_admin_token", "Missing or invalid admin token.")
 		return
 	}
 	a.log.Info("admin sign-in", "method", MethodToken, "remote", r.RemoteAddr)
+	a.signedIn(Principal{Method: MethodToken}, true)
 	a.setSession(w, r, session{Method: MethodToken, TokenMAC: a.tokenMAC()})
 	writeJSON(w, http.StatusOK, Principal{Method: MethodToken})
 }
@@ -271,10 +284,12 @@ func (a *Auth) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	if !a.allowed(email, groups) {
 		a.log.Warn("admin sign-in refused", "method", MethodOIDC, "email", email, "subject", idt.Subject)
+		a.signedIn(Principal{Method: MethodOIDC, Email: email, Name: name}, false)
 		redirectError(w, r, "not_allowed")
 		return
 	}
 	a.log.Info("admin sign-in", "method", MethodOIDC, "email", email, "subject", idt.Subject)
+	a.signedIn(Principal{Method: MethodOIDC, Email: email, Name: name}, true)
 	// Keep only the groups that matter, so the cookie stays small.
 	groups = slices.DeleteFunc(groups, func(g string) bool { return !slices.Contains(a.cfg.OIDC.AllowedGroups, g) })
 	a.setSession(w, r, session{Method: MethodOIDC, Email: email, Name: name, Groups: groups})

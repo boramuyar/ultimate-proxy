@@ -41,6 +41,7 @@ type Server struct {
 
 func New(cfg *config.Config, st store.Store, m *meter.Meter, log *slog.Logger) (*Server, error) {
 	s := &Server{cfg: cfg, adminAuth: adminauth.New(cfg.Admin, log), store: st, meter: m, providers: map[string]*provider.OpenAI{}, prices: pricing.New(st, log), log: log}
+	s.adminAuth.OnSignIn = s.auditSignIn
 	client := provider.NewHTTPClient(cfg.ResponseHeaderTimeout)
 	for _, p := range cfg.Providers {
 		s.providers[p.Name] = provider.NewOpenAI(p.Name, p.BaseURL, p.APIKey, p.Headers, client)
@@ -125,7 +126,8 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("DELETE /admin/limits/{id}", s.deleteLimit)
 	admin.HandleFunc("GET /admin/prices", s.listPrices)
 	admin.HandleFunc("POST /admin/prices", s.addPrice)
-	mux.Handle("/admin/", s.requireAdmin(admin))
+	admin.HandleFunc("GET /admin/audit", s.listAudit)
+	mux.Handle("/admin/", s.requireAdmin(s.audit(admin)))
 	mux.Handle("/admin/auth/", s.adminAuth.Handler())
 	return s.cors(mux)
 }
